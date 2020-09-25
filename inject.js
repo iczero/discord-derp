@@ -1,15 +1,12 @@
 const electron = require('electron');
-const { app } = electron;
-const { promises: fsP } = require('fs');
 const path = require('path');
-const { pathToFileURL } = require('url');
+const { promises: fsP } = require('fs');
 
 // replace index.js in modules/discord_desktop_core with
-// module.exports = require('./inject.js').core;
+// module.exports = require('./inject.js');
 
 const log = (...args) => console.log('inject:', ...args);
 const MAIN_WINDOW_TITLE = 'Discord';
-const DESKTOP_CORE_PATH = module.parent.path;
 
 let electronModule = require.cache[require.resolve('electron')];
 let getElectronExports = Object.getOwnPropertyDescriptor(electronModule, 'exports').get;
@@ -38,46 +35,15 @@ Object.defineProperty(electronModule, 'exports', {
     return exports;
   }
 });
-log('electron module post', electronModule);
 
-/*
-let windowCreatedEventReceived = false;
-let mainWindow = null;
-
-// TODO: don't know if this is actually the main window, but oh well
-app.on('browser-window-created', (_event, window) => {
-  log('window launched with id', window.id);
-  log('global.mainWindowId is', global.mainWindowId);
-  if (windowCreatedEventReceived) {
-    log('duplicate browser-window-created event! window id:', window.id);
-    return;
-  }
-  windowCreatedEventReceived = true;
-
-  let loaded = false;
-  window.webContents.on('did-finish-load', () => {
-    log('main window fired event did-finish-load');
-    if (loaded) log('main window reloaded');
-    else loaded = true;
-    hookRenderer(window);
-  });
-
-  setupIpc();
+electron.ipcMain.on('INJECT_GET_CORE_MODULE_PATH', event => {
+  event.returnValue = path.dirname(require.resolve('discord_desktop_core'))
 });
 
-async function hookRenderer(window) {
-  let webContents = window.webContents;
-  let injectRenderer = (await fsP.readFile(__dirname + '/inject-renderer.js')).toString();
-  webContents.executeJavaScript(injectRenderer);
-  log('injected into renderer process');
-  mainWindow = window;
-}
+electron.ipcMain.on('INJECT_LOAD_COMPLETE', async event => {
+  log('received load complete event, sending renderer inject script');
+  let injectRenderer = (await fsP.readFile(path.join(__dirname, 'inject-renderer.js'))).toString();
+  event.sender.executeJavaScript(injectRenderer);
+});
 
-async function setupIpc() {
-}
-*/
-
-module.exports = {
-  core: require(path.join(DESKTOP_CORE_PATH, 'core.asar')),
-  DESKTOP_CORE_PATH
-};
+module.exports = require('discord_desktop_core/core.asar');
