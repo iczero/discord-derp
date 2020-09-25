@@ -80,8 +80,15 @@ async function editMessage(channel, message, body) {
   });
 }
 
+let useMpv = true;
+
 // mpv override lmao
+let _play = HTMLVideoElement.prototype.play;
 HTMLVideoElement.prototype.play = function play() {
-  console.log('starting mpv on', this.src);
-  inject.ipc.invoke('INJECT_LAUNCH_MPV', this.src);
+  if (useMpv) {
+    console.log('starting mpv on', this.src);
+    inject.ipc.invoke('INJECT_LAUNCH_MPV', this.src);
+  } else {
+    _play.call(this);
+  }
 }
