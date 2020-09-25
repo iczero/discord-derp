@@ -8,7 +8,11 @@ log('core module path', CORE_MODULE_PATH);
 log('loading DiscordNative');
 require(path.join(CORE_MODULE_PATH, 'core.asar/app/mainScreenPreload.js'));
 
+let injectExports = Object.create(null);
+injectExports.ipc = electron.ipcRenderer;
+
 if (window.opener === null) {
   // we are in main window
   window.addEventListener('load', electron.ipcRenderer.send('INJECT_LOAD_COMPLETE'));
+  electron.contextBridge.exposeInMainWorld('inject', injectExports);
 }

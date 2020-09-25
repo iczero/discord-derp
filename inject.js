@@ -47,3 +47,21 @@ electron.ipcMain.on('INJECT_LOAD_COMPLETE', async event => {
 });
 
 module.exports = require('discord_desktop_core/core.asar');
+
+{
+  // mpv thing lol
+  const childProcess = require('child_process');
+  electron.ipcMain.handle('INJECT_LAUNCH_MPV', (event, media) => {
+    let widBuf = electron.BrowserWindow.fromWebContents(event.sender).getNativeWindowHandle();
+    let wid = widBuf.readUInt32LE();
+    log('starting mpv on wid', wid, 'for', media)
+    childProcess.spawn('mpv', [
+      '--wid=' + wid,
+      '--keep-open=no',
+      '--',
+      media
+    ], {
+      stdio: ['ignore', 'inherit', 'inherit']
+    });
+  });
+}

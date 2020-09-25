@@ -79,3 +79,9 @@ async function editMessage(channel, message, body) {
     }, body)
   });
 }
+
+// mpv override lmao
+HTMLVideoElement.prototype.play = function play() {
+  console.log('starting mpv on', this.src);
+  inject.ipc.invoke('INJECT_LAUNCH_MPV', this.src);
+}
