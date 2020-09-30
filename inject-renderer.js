@@ -1,5 +1,6 @@
 /* eslint-disable new-cap */
 // push a module named 10000000 that exports require(), then run it immediately
+// require.c contains all modules registered with webpack
 const modulesList = window.webpackJsonp.push([
   [], { 10000000: (module, _exports, require) => module.exports = require.c },
   [[10000000]]
@@ -31,6 +32,8 @@ function resolveModules(def) {
   return found;
 }
 
+// hardcoding numbers is bad as they change literally every week with new builds
+// find modules by searching for matching exports instead
 const resolvedModules = resolveModules({
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
@@ -45,9 +48,13 @@ const api = resolvedModules.api.default;
 const GatewaySocket = resolvedModules.gateway.default;
 const EventEmitter = resolvedModules.events.EventEmitter
 
+// probably not necessary considering most events get sent to the dispatcher anyways
+let gatewayEvents = new EventEmitter();
+
+// we get injected before GatewaySocket.connect is called
+// hijack connect to get the socket object
 let gatewaySocket;
 let gatewayConnectOriginal = GatewaySocket.prototype.connect;
-let gatewayEvents = new EventEmitter();
 GatewaySocket.prototype.connect = function connect() {
   log('intercepted GatewaySocket.connect');
   gatewaySocket = this;
@@ -55,9 +62,9 @@ GatewaySocket.prototype.connect = function connect() {
   gatewaySocket.on('dispatch', (event, ...args) => gatewayEvents.emit(event, ...args));
 }
 
+// expose convenience variables for usage in devtools
 let currentGuild = null;
 let currentChannel = null;
-
 dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
   currentGuild = event.guildId;
   currentChannel = event.channelId;
@@ -94,9 +101,9 @@ async function editMessage(channel, message, body) {
   });
 }
 
-let useMpv = false;
-
 // mpv override lmao
+// note: is very bad, do not use, can and will delete discord to autoplay gifs
+let useMpv = false;
 let _play = HTMLVideoElement.prototype.play;
 HTMLVideoElement.prototype.play = function play() {
   if (useMpv) {
