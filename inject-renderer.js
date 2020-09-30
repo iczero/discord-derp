@@ -1,12 +1,12 @@
 /* eslint-disable new-cap */
-// don't get logged out (no longer works)
-// window.DiscordNative.window.webContents._events['devtools-closed']();
-
-// push a module named 10000 that exports require(), then run it immediately
-const require = window.webpackJsonp.push([
-  [], { 10000000: (module, exports, require) => module.exports = require },
+// push a module named 10000000 that exports require(), then run it immediately
+const modulesList = window.webpackJsonp.push([
+  [], { 10000000: (module, _exports, require) => module.exports = require.c },
   [[10000000]]
 ]);
+const require = n => modulesList[n].exports;
+
+const log = (...args) => console.log('inject-renderer:', ...args);
 
 /**
  * Resolve modules by characteristics
@@ -17,11 +17,11 @@ function resolveModules(def) {
   let needed = new Set();
   let found = {};
   for (let name of Object.keys(def)) needed.add(name);
-  for (let i = 0; i < 1e6; i++) {
+  for (let i of Object.keys(modulesList)) {
     for (let name of needed) {
       let module = require(i);
       if (def[name](module)) {
-        console.log(`found module ${name} at ${i}`);
+        log(`found module ${name} at ${i}`);
         found[name] = module;
         needed.delete(name);
         if (needed.size === 0) break;
@@ -31,15 +31,29 @@ function resolveModules(def) {
   return found;
 }
 
-const modules = resolveModules({
+const resolvedModules = resolveModules({
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
-  api: m => m.default && typeof m.default.APIError === 'function'
+  api: m => m.default && typeof m.default.APIError === 'function',
+  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
+  events: m => typeof m.EventEmitter === 'function'
 });
 
-const { Endpoints, ActionTypes } = modules.data;
-const dispatcher = modules.dispatcher.default;
-const api = modules.api.default;
+const { Endpoints, ActionTypes } = resolvedModules.data;
+const dispatcher = resolvedModules.dispatcher.default;
+const api = resolvedModules.api.default;
+const GatewaySocket = resolvedModules.gateway.default;
+const EventEmitter = resolvedModules.events.EventEmitter
+
+let gatewaySocket;
+let gatewayConnectOriginal = GatewaySocket.prototype.connect;
+let gatewayEvents = new EventEmitter();
+GatewaySocket.prototype.connect = function connect() {
+  log('intercepted GatewaySocket.connect');
+  gatewaySocket = this;
+  gatewayConnectOriginal.call(this);
+  gatewaySocket.on('dispatch', (event, ...args) => gatewayEvents.emit(event, ...args));
+}
 
 let currentGuild = null;
 let currentChannel = null;
@@ -80,13 +94,13 @@ async function editMessage(channel, message, body) {
   });
 }
 
-let useMpv = true;
+let useMpv = false;
 
 // mpv override lmao
 let _play = HTMLVideoElement.prototype.play;
 HTMLVideoElement.prototype.play = function play() {
   if (useMpv) {
-    console.log('starting mpv on', this.src);
+    log('starting mpv on', this.src);
     inject.ipc.invoke('INJECT_LAUNCH_MPV', this.src);
   } else {
     _play.call(this);

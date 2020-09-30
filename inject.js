@@ -40,12 +40,6 @@ electron.ipcMain.on('INJECT_GET_CORE_MODULE_PATH', event => {
   event.returnValue = path.dirname(require.resolve('discord_desktop_core'))
 });
 
-electron.ipcMain.on('INJECT_LOAD_COMPLETE', async event => {
-  log('received load complete event, sending renderer inject script');
-  let injectRenderer = (await fsP.readFile(path.join(__dirname, 'inject-renderer.js'))).toString();
-  event.sender.executeJavaScript(injectRenderer);
-});
-
 module.exports = require('discord_desktop_core/core.asar');
 
 {
