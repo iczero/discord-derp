@@ -1,4 +1,6 @@
 /* eslint-disable new-cap */
+const log = (...args) => console.log('inject-renderer:', ...args);
+
 // push a module named 10000000 that exports require(), then run it immediately
 // require.c contains all modules registered with webpack
 const modulesList = window.webpackJsonp.push([
@@ -6,8 +8,6 @@ const modulesList = window.webpackJsonp.push([
   [[10000000]]
 ]);
 const require = n => modulesList[n].exports;
-
-const log = (...args) => console.log('inject-renderer:', ...args);
 
 /**
  * Resolve modules by characteristics
@@ -18,14 +18,14 @@ function resolveModules(def) {
   let needed = new Set();
   let found = {};
   for (let name of Object.keys(def)) needed.add(name);
-  for (let i of Object.keys(modulesList)) {
+  moduleLoop: for (let i of Object.keys(modulesList)) {
     for (let name of needed) {
       let module = require(i);
       if (def[name](module)) {
         log(`found module ${name} at ${i}`);
         found[name] = module;
         needed.delete(name);
-        if (needed.size === 0) break;
+        if (needed.size === 0) break moduleLoop;
       }
     }
   }
@@ -70,6 +70,8 @@ dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
   currentChannel = event.channelId;
 });
 
+let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * Send a message to a channel
  * @param {string} channel Channel id
@@ -99,6 +101,29 @@ async function editMessage(channel, message, body) {
       tts: false
     }, body)
   });
+}
+
+const REGIONAL_INDICATOR_START_1 = 55356;
+const REGIONAL_INDICATOR_START_2 = 56806;
+const ASCII_LOWERCASE_START = 97;
+/**
+ * React with an isogram to a message
+ * @param {string} channel Channel id
+ * @param {string} message Message id
+ * @param {string} string Isogram
+ */
+async function isogramReact(channel, message, string) {
+  if (!/^[a-z]+$/.exec(string)) throw new Error('Invalid characters in string');
+  let used = new Map();
+  let reactions = string.split('').map((s, i) => {
+    let char = s.charCodeAt(0) - ASCII_LOWERCASE_START;
+    if (used.has(char)) throw new Error(`Not an isogram: character ${s} (index ${i}) is repeated`);
+    return String.fromCharCode(REGIONAL_INDICATOR_START_1, REGIONAL_INDICATOR_START_2 + char);
+  });
+  for (let react of reactions) {
+    await api.put(Endpoints.REACTION(channel, message, react, '@me'));
+    await sleep(200);
+  }
 }
 
 // mpv override lmao
