@@ -18,12 +18,11 @@ function resolveModules(def) {
   let needed = new Set();
   let found = {};
   for (let name of Object.keys(def)) needed.add(name);
-  moduleLoop: for (let i of Object.keys(modulesList)) {
+  moduleLoop: for (let [i, selectedModule] of Object.entries(modulesList)) {
     for (let name of needed) {
-      let module = require(i);
-      if (def[name](module)) {
+      if (def[name](selectedModule.exports)) {
         log(`found module ${name} at ${i}`);
-        found[name] = module;
+        found[name] = selectedModule.exports;
         needed.delete(name);
         if (needed.size === 0) break moduleLoop;
       }
@@ -35,11 +34,17 @@ function resolveModules(def) {
 // hardcoding numbers is bad as they change literally every week with new builds
 // find modules by searching for matching exports instead
 const resolvedModules = resolveModules({
+  react: m => typeof m.version === 'string' && m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED,
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
   api: m => m.default && typeof m.default.APIError === 'function',
-  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
-  events: m => typeof m.EventEmitter === 'function'
+  users: m => m.default && typeof m.default.getUsers === 'function',
+  channels: m => m.default && typeof m.default.getChannels === 'function',
+  guilds: m => m.default && typeof m.default.getGuilds === 'function',
+  events: m => typeof m.EventEmitter === 'function',
+  reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
+  messages: m => m.default && typeof m.default.getMessages === 'function',
+  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover
 });
 
 const { Endpoints, ActionTypes } = resolvedModules.data;
@@ -47,6 +52,11 @@ const dispatcher = resolvedModules.dispatcher.default;
 const api = resolvedModules.api.default;
 const GatewaySocket = resolvedModules.gateway.default;
 const EventEmitter = resolvedModules.events.EventEmitter
+const React = resolvedModules.react;
+const ReactDOM = resolvedModules.reactDOM;
+const userRegistry = resolvedModules.users.default;
+const channelRegistry = resolvedModules.channels.default;
+const guildRegistry = resolvedModules.guilds.default;
 
 // probably not necessary considering most events get sent to the dispatcher anyways
 let gatewayEvents = new EventEmitter();
@@ -118,6 +128,7 @@ async function isogramReact(channel, message, string) {
   let reactions = string.split('').map((s, i) => {
     let char = s.charCodeAt(0) - ASCII_LOWERCASE_START;
     if (used.has(char)) throw new Error(`Not an isogram: character ${s} (index ${i}) is repeated`);
+    used.set(char, true);
     return String.fromCharCode(REGIONAL_INDICATOR_START_1, REGIONAL_INDICATOR_START_2 + char);
   });
   for (let react of reactions) {

@@ -1,5 +1,7 @@
 const electron = require('electron');
 const path = require('path');
+const fs = require('fs');
+const fsP = fs.promises;
 
 // replace index.js in modules/discord_desktop_core with
 // module.exports = require('/absolute/path/to/inject.js');
@@ -49,6 +51,45 @@ Object.defineProperty(electronModule, 'exports', {
     return exports;
   }
 });
+
+// try to load react devtools
+const REACT_DEVTOOLS_EXTENSION_ID = 'fmkadmapgofadopljbjfkapdkoienihi';
+(async () => {
+  // electron app ready event seems to already have fired
+  let chromeDataPath;
+  switch (process.platform) {
+    case 'linux':
+      chromeDataPath = path.resolve(process.env.HOME, '.config/google-chrome');
+      break;
+    case 'win32':
+      chromeDataPath = path.resolve(process.env.LOCALAPPDATA, 'Google/Chrome/User Data');
+      break;
+    case 'darwin':
+      chromeDataPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome');
+      break;
+    default:
+      log('unknown platform, not loading react devtools');
+      return;
+  }
+
+  let extensionDir = path.join(chromeDataPath, 'Default/Extensions', REACT_DEVTOOLS_EXTENSION_ID);
+  let versions;
+  try {
+    versions = await fsP.readdir(extensionDir);
+  } catch (err) { /* handled later */ }
+  if (!versions || !versions.length) {
+    log('could not find react devtools in default profile');
+    return;
+  }
+
+  let version = versions[versions.length - 1];
+  let extensionPath = path.join(extensionDir, version);
+  if (electron.BrowserWindow.addDevToolsExtension(extensionPath)) {
+    log('loaded react devtools, version', version);
+  } else {
+    log('failed to load react devtools');
+  }
+})();
 
 // actually load the module itself
 // everything before this should not assume discord exists
