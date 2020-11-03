@@ -1,0 +1,26 @@
+{
+  "name": "discord-derp",
+  "version": "0.0.0",
+  "description": "random discord crap",
+  "main": "inject.js",
+  "dependencies": {
+    "wolframalpha-websocket-api": "github:iczero/wolframalpha-websocket-api"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iczero/discord-derp.git"
+  },
+  "keywords": [
+    "discord"
+  ],
+  "author": "iczero",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/iczero/discord-derp/issues"
+  },
+  "homepage": "https://github.com/iczero/discord-derp#readme"
+}

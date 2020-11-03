@@ -176,3 +176,194 @@ HTMLVideoElement.prototype.play = function play() {
     _play.call(this);
   }
 }
+
+const TRUNCATED_TEXT = '**[truncated]**';
+function truncateLinesArray(lines, maxLength = 2000) {
+  let truncatedArray = [];
+  let length = 0;
+  for (let [i, entry] of lines.entries()) {
+    let entryLength = entry.length + 1;
+    if (length + entryLength > maxLength) {
+      if (length + TRUNCATED_TEXT.length + 1 > maxLength) {
+        truncatedArray[i - 1] = TRUNCATED_TEXT;
+      } else {
+        truncatedArray.push(TRUNCATED_TEXT);
+      }
+      break;
+    }
+    truncatedArray.push(entry);
+  }
+  return truncatedArray.join('\n');
+}
+
+// stupid commands
+let enableCommands = true;
+const PREFIX = '=';
+const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639']);
+const MESSAGE_MAX_LENGTH = 2000;
+const EMBED_MAX_LENGTH = 2000;
+const EMBED_MAX_FIELDS = 25;
+const EMBED_FIELD_NAME_MAX_LENGTH = 256;
+const EMBED_FIELD_VALUE_MAX_LENGTH = 1024;
+gatewayEvents.on('MESSAGE_CREATE', async event => {
+  if (!enableCommands) return;
+  let channel = channelRegistry.getChannel(event.channel_id);
+  if (!channel) return;
+  if (!ALLOWED_GUILDS.has(event.guild_id)) return;
+  if (!event.content.startsWith(PREFIX)) return;
+  let messageSplit = event.content.split(' ');
+  let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
+  log('command:', args[0], event);
+  switch (args[0].toLowerCase()) {
+    case 'annoy': {
+      let mentions = event.mentions;
+      if (!mentions.length) break;
+      let target = mentions[0].id;
+      let ntt = `<@${target}> `;
+      if (ntt.length > 25) break;
+      ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
+      ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
+      await sendMessage(event.channel_id, { content: ntt });
+      break;
+    }
+    case 'wa': {
+      let query = args.slice(1).join(' ').replace(/\n/g, ' ');
+      let promise = inject.wolframAlphaQuery(query);
+
+      let user = userRegistry.getUser(event.author.id);
+      let avatarURL = user.getAvatarURL();
+      let username = user.username;
+      let displayedQuery = query;
+      if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
+      let embed = {
+        title: 'WolframAlpha: ' + displayedQuery,
+        description: 'Running...',
+        timestamp: (new Date()).toISOString(),
+        footer: {
+          icon_url: avatarURL,
+          text: username
+        },
+        color: 0x2decfa
+      };
+      let sent = await sendMessage(event.channel_id, { embed });
+      let messageId = sent.body.id;
+      
+      let response = await promise;
+      log('wolframalpha response:', response);
+
+      let baseMessageLength = embed.title.length + username.length;
+      process: {
+        if (response.failed) {
+          embed.color = 0xff0000;
+          embed.description = '**No results**';
+          break process;
+        }
+
+        embed.color = 0x00ff00;
+        let description = [];
+        let maybeImage = null;
+
+        if (response.timedOut.length) {
+          description.push('**Warning**: The following queries timed out: ' + response.timedOut.join(', '));
+        }
+        for (let { text } of response.warnings) {
+          description.push('**Warning**: ' + text);
+        }
+        if (response.correctedInput && response.originalInput !== response.correctedInput) {
+          description.push('**Using input**: ' + response.correctedInput);
+        }
+        for (let { string } of response.assumptions) {
+          description.push(string);
+        }
+        for (let topic of response.futureTopic) {
+          description.push(`**${topic.topic}**: ${topic.msg}`);
+        }
+        if (response.erroredPods.length) {
+          description.push('**Warning**: The following pods errored: ' +
+            response.erroredPods.map(pod => pod.id).join(', '));
+        }
+
+        if (!response.pods.size) {
+          embed.color = 0xff0000;
+          description.unshift('**Warning**: No pods in response (query timed out?)');
+          embed.description = truncateLinesArray(description, EMBED_MAX_LENGTH - baseMessageLength);
+          break process;
+        }
+
+        let fields = [];
+        podLoop: for (let pod of response.pods.values()) {
+          let value = [];
+          let stepByStepPod = response.stepByStep.get(pod.position);
+          if (pod.error) value.push('**Warning**: this pod errored');
+          if (pod.subpods) {
+            for (let subpod of pod.subpods) {
+              if (subpod.plaintext) {
+                // i shit you not this is literally in their code
+                // maybe lift this constant somewhere
+                const REQUIRES_INTERACTIVITY = '(requires interactivity)';
+                if (subpod.plaintext === REQUIRES_INTERACTIVITY) {
+                  if (!stepByStepPod) continue podLoop;
+                } else value.push(subpod.plaintext);
+              } else if (subpod.img) {
+                value.push('**Image**: ' + subpod.img.src);
+                if (!maybeImage) maybeImage = subpod.img.src;
+              } else value.push('(no representation available)');
+            }
+          }
+          if (pod.async) value.push('**Async pod data**: ' + pod.async);
+          if (stepByStepPod) {
+            value.push('**Step by step**: ' + stepByStepPod.title);
+            for (let subpod of stepByStepPod.subpods) {
+              if (subpod.plaintext) value.push(subpod.plaintext);
+              else if (subpod.img) value.push('**Image**: ' + subpod.img.src);
+              else value.push('(no representation available)');
+            }
+          }
+          if (!value.length) value.push('No data (possible pod error?)');
+          fields.push({
+            name: pod.title.slice(0, EMBED_FIELD_NAME_MAX_LENGTH),
+            value: truncateLinesArray(value, EMBED_FIELD_VALUE_MAX_LENGTH)
+          });
+        }
+        let makePodLimitWarning = n => `**Warning**: only the first ${n} pods are shown`;
+        let podLimitWarning = null;
+        if (fields.length > EMBED_MAX_FIELDS) {
+          fields = fields.slice(0, EMBED_MAX_FIELDS);
+          podLimitWarning = EMBED_MAX_FIELDS;
+        }
+
+        const DESCRIPTION_MAX_LENGTH = 1000;
+        let descriptionMaxLength = DESCRIPTION_MAX_LENGTH;
+        embed.description = truncateLinesArray(description, descriptionMaxLength);
+        let embedLength = baseMessageLength + Math.min(embed.description.length + (podLimitWarning
+          ? makePodLimitWarning(podLimitWarning).length
+          : 0), descriptionMaxLength);
+        embed.fields = []
+        for (let field of fields) {
+          let fieldLength = field.name.length + field.value.length;
+          if (embedLength + fieldLength > EMBED_MAX_LENGTH) {
+            let exceededLength =  (embedLength + makePodLimitWarning(embed.fields.length).length) - EMBED_MAX_LENGTH;
+            if (!podLimitWarning && exceededLength > 0) {
+              // try to fit warning in
+              descriptionMaxLength -= exceededLength;
+            }
+            // replace existing warning
+            podLimitWarning = embed.fields.length;
+            break;
+          } else {
+            embedLength += fieldLength;
+            embed.fields.push(field);
+          }
+        }
+        if (podLimitWarning) description.unshift(makePodLimitWarning(podLimitWarning));
+        embed.description = truncateLinesArray(description, descriptionMaxLength);
+        if (maybeImage) {
+          embed.image = { url: maybeImage };
+        }
+        embed.timestamp = (new Date()).toISOString();
+      }
+
+      await editMessage(event.channel_id, messageId, { embed });
+    }
+  }
+});

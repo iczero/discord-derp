@@ -38,5 +38,16 @@ if (window.opener === null) {
     // with the frame. another script is loaded here for that purpose
     electron.webFrame.executeJavaScript(await injectRenderer);
   });
-  electron.contextBridge.exposeInMainWorld('inject', injectExports);
 }
+
+{ // TODO: actual modules or something that isn't dumb at least
+  const { WolframAlphaApi } = require('wolframalpha-websocket-api');
+  let api = new WolframAlphaApi();
+  injectExports.wolframAlphaQuery = async query => {
+    let response = api.query(query);
+    await response.promise;
+    return response;
+  };
+}
+
+electron.contextBridge.exposeInMainWorld('inject', injectExports);
