@@ -69,7 +69,17 @@ const messageActions = resolvedModules.messageActions.default;
 const messageQueue = resolvedModules.messageQueue.default;
 const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 
-// probably not necessary considering most events get sent to the dispatcher anyways
+/*
+function lateResolveModules() {
+  log('resolving late modules');
+  Object.assign(resolvedModules, resolveModules({
+    slowmode: m => m.default && typeof m.default.getSlowmodeCooldownGuess === 'function'
+  }));
+
+  slowmode = resolvedModules.slowmode.default;
+}
+*/
+
 let gatewayEvents = new EventEmitter();
 
 // we get injected before GatewaySocket.connect is called
@@ -80,6 +90,7 @@ GatewaySocket.prototype.connect = function connect() {
   log('intercepted GatewaySocket.connect');
   gatewaySocket = this;
   gatewayConnectOriginal.call(this);
+  // lateResolveModules();
   gatewaySocket.on('dispatch', (event, ...args) => gatewayEvents.emit(event, ...args));
 }
 
@@ -95,11 +106,11 @@ let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
 
 /**
- * Send a message to a channel
+ * Send a message to a channel, without slowmode handling
  * @param {string} channel Channel id
  * @param {object} body Message body
  */
-function sendMessage(channel, body) {
+function sendMessageDirect(channel, body) {
  return new Promise((resolve, reject) => {
    messageQueue.enqueue({
      type: MessageDataType.SEND,
@@ -110,10 +121,145 @@ function sendMessage(channel, body) {
        ...body
      }
    }, result => {
-    if (!result.ok) reject(result);
-    else resolve(result);
+    if (!result.ok) {
+      messageActions.sendBotMessage(currentChannel, '**Warning**: send message failed: ```json\n' +
+        JSON.stringify(result, null, 2) + '\n```');
+      reject(result);
+    } else resolve(result);
    });
  });
+}
+
+class Deferred {
+  constructor() {
+    this.promise = new Promise((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
+  }
+}
+
+/** Slowmode handler */
+class SlowmodeQueue {
+  constructor() {
+    /** @type {Map<string, { channelId: string, body: any, deferred: Deferred }[]>} */
+    this.channelQueues = new Map();
+    /** @type {Map<string, number>} */
+    this.slowmodeTimers = new Map();
+  }
+
+  restartCooldown(channelId) {
+    let channel = channelRegistry.getChannel(channelId);
+    if (!channel.rateLimitPerUser) return;
+    let cooldownEnd = channel.rateLimitPerUser * 1000 + Date.now();
+    let current = this.slowmodeTimers.get(channelId);
+    if (!current || cooldownEnd > current) this.slowmodeTimers.set(channelId, cooldownEnd);
+  }
+
+  queryCooldown(channelId) {
+    let cooldownEnd = this.slowmodeTimers.get(channelId);
+    if (!cooldownEnd) return 0;
+    if (cooldownEnd < Date.now()) {
+      this.slowmodeTimers.delete(channelId);
+      return 0;
+    } else return cooldownEnd - Date.now();
+  }
+
+  /**
+   * Get whether messages to a channel should be queued
+   * @param {string} channelId
+   */
+  shouldQueue(channelId) {
+    let channel = this.channelQueues.get(channelId);
+    return this.queryCooldown(channelId) > 0 || (channel && !channel.length);
+  }
+
+  /**
+   * Enqueue a message
+   * @param {string} channelId
+   * @param {object} body
+   * @return {Promise<any>}
+   */
+  enqueue(channelId, body) {
+    let delay = this.queryCooldown(channelId);
+    let queue = this.channelQueues.get(channelId);
+    let shouldSchedule = false;
+    if (!queue) {
+      queue = [];
+      this.channelQueues.set(channelId, queue);
+      shouldSchedule = true;
+    }
+    let deferred = new Deferred();
+    queue.unshift({ channelId, body, deferred });
+    if (shouldSchedule) {
+      if (delay) setTimeout(() => this.drain(channelId), delay);
+      else this.drain(channelId);
+    }
+    return deferred.promise;
+  }
+
+  /**
+   * Drain messages in queue for channel
+   * @param {string} channelId
+   */
+  async drain(channelId) {
+    let queue = this.channelQueues.get(channelId);
+    if (!queue) return; // nothing to do?
+    let delay = this.queryCooldown(channelId);
+    if (delay) {
+      // reschedule to later
+      log(`slowmode: rescheduling drain for channel ${channelId} (${delay} ms remaining)`);
+      setTimeout(() => this.drain(channelId), delay);
+      return;
+    }
+    let top = queue.pop();
+    if (!top) return;
+    let result;
+    try {
+      result = await sendMessageDirect(channelId, top.body);
+    } catch (err) {
+      if (err.status === 429 && err.body.code === 20016) {
+        queue.push(top);
+        setTimeout(() => this.drain(channelId), err.body.retry_after * 1000);
+        return;
+      } else top.deferred.reject(err);
+    }
+    top.deferred.resolve(result);
+
+    if (!queue.length) this.channelQueues.delete(channelId);
+    let ratelimit = channelRegistry.getChannel(channelId).rateLimitPerUser * 1000;
+    // inform ui
+    dispatcher.dispatch({ type: ActionTypes.SLOWMODE_START_COOLDOWN, channelId });
+    if (queue.length) setTimeout(() => this.drain(channelId), ratelimit);
+  }
+
+  clearQueues() {
+    for (let queue of this.channelQueues.values()) {
+      for (let entry of queue) {
+        if (entry.deferred) entry.deferred.reject(new Error('slowmode queue cleared'));
+      }
+    }
+    this.channelQueues.clear();
+  }
+}
+
+let slowmodeQueue = new SlowmodeQueue();
+
+// start slowmode cooldown on self message
+gatewayEvents.on('MESSAGE_CREATE', event => {
+  if (event.author.id === userRegistry.getCurrentUser().id) {
+    slowmodeQueue.restartCooldown(event.channel_id);
+  }
+});
+
+/**
+ * Send a message to a channel
+ * @param {string} channel Channel id
+ * @param {object} body Message body
+ */
+async function sendMessage(channel, body) {
+  if (!slowmodeQueue.shouldQueue(channel)) return await sendMessageDirect(channel, body);
+  else return await slowmodeQueue.enqueue(channel, body);
 }
 
 /**
@@ -200,6 +346,7 @@ function truncateLinesArray(lines, maxLength = 2000) {
 let enableCommands = true;
 const PREFIX = '=';
 const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639']);
+const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands']);
 const MESSAGE_MAX_LENGTH = 2000;
 const EMBED_MAX_LENGTH = 2000;
 const EMBED_MAX_FIELDS = 25;
@@ -209,12 +356,26 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
   if (!enableCommands) return;
   let channel = channelRegistry.getChannel(event.channel_id);
   if (!channel) return;
-  if (!ALLOWED_GUILDS.has(event.guild_id)) return;
-  if (!event.content.startsWith(PREFIX)) return;
   let messageSplit = event.content.split(' ');
   let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
+  if (!ALLOWED_GUILDS.has(event.guild_id)) {
+    if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
+  }
+  if (!event.content.startsWith(PREFIX)) return;
   log('command:', args[0], event);
   switch (args[0].toLowerCase()) {
+    case 'guildcommands': {
+      if (event.author.id !== userRegistry.getCurrentUser().id) return;
+      let subcommand = args[1].toLowerCase();
+      if (subcommand === 'enable') {
+        ALLOWED_GUILDS.add(event.guild_id);
+        await sendMessage(event.channel_id, { content: 'commands enabled for guild' });
+      } else if (subcommand === 'disable') {
+        ALLOWED_GUILDS.delete(event.guild_id);
+        await sendMessage(event.channel_id, { content: 'commands disabled for guild' });
+      } else await sendMessage(event.channel_id, { content: '?' });
+      break;
+    }
     case 'annoy': {
       let mentions = event.mentions;
       if (!mentions.length) break;
@@ -342,12 +503,18 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
         for (let field of fields) {
           let fieldLength = field.name.length + field.value.length;
           if (embedLength + fieldLength > EMBED_MAX_LENGTH) {
-            let exceededLength =  (embedLength + makePodLimitWarning(embed.fields.length).length) - EMBED_MAX_LENGTH;
+            let exceededLength = (embedLength + makePodLimitWarning(embed.fields.length).length) - EMBED_MAX_LENGTH;
             if (!podLimitWarning && exceededLength > 0) {
               // try to fit warning in
-              descriptionMaxLength -= exceededLength;
+              let lastField;
+              do {
+                lastField = embed.fields.pop();
+                embedLength -= lastField.name.length + lastField.value.length;
+              } while (embedLength + fieldLength > EMBED_MAX_LENGTH);
             }
             // replace existing warning
+            // we don't have to worry about length as if the pod limit warning already
+            // exists it is for 25, which is >= the length of what it needs to be now
             podLimitWarning = embed.fields.length;
             break;
           } else {
