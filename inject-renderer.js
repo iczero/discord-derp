@@ -1,5 +1,10 @@
 /* eslint-disable new-cap */
-const log = (...args) => console.log('inject-renderer:', ...args);
+const log = (...args) => inject.console.log('inject-renderer:', ...args);
+
+// prevent sentry from doing anything
+window.__SENTRY__.globalEventProcessors = [() => null];
+window.__SENTRY__ = null;
+window.DiscordSentry = null;
 
 // push a module named 10000000 that exports require(), then run it immediately
 // require.c contains all modules registered with webpack
@@ -43,7 +48,9 @@ const resolvedModules = resolveModules({
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
+  messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
   messages: m => m.default && typeof m.default.getMessages === 'function',
+  messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
   gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover
 });
 
@@ -57,6 +64,10 @@ const ReactDOM = resolvedModules.reactDOM;
 const userRegistry = resolvedModules.users.default;
 const channelRegistry = resolvedModules.channels.default;
 const guildRegistry = resolvedModules.guilds.default;
+const messageRegistry = resolvedModules.messages.default;
+const messageActions = resolvedModules.messageActions.default;
+const messageQueue = resolvedModules.messageQueue.default;
+const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 
 // probably not necessary considering most events get sent to the dispatcher anyways
 let gatewayEvents = new EventEmitter();
@@ -81,20 +92,28 @@ dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
 });
 
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
 
 /**
  * Send a message to a channel
  * @param {string} channel Channel id
  * @param {object} body Message body
  */
-async function sendMessage(channel, body) {
-  return await api.post({
-    url: Endpoints.MESSAGES(channel),
-    body: Object.assign({}, {
-      nonce: Math.floor(Math.random() * 1e16).toString(),
-      tts: false
-    }, body)
-  });
+function sendMessage(channel, body) {
+ return new Promise((resolve, reject) => {
+   messageQueue.enqueue({
+     type: MessageDataType.SEND,
+     message: {
+       channelId: channel,
+       nonce: generateNonce(),
+       tts: false,
+       ...body
+     }
+   }, result => {
+    if (!result.ok) reject(result);
+    else resolve(result);
+   });
+ });
 }
 
 /**
@@ -134,6 +153,14 @@ async function isogramReact(channel, message, string) {
   for (let react of reactions) {
     await api.put(Endpoints.REACTION(channel, message, react, '@me'));
     await sleep(200);
+  }
+}
+
+function logArgs(name) {
+  return function argsLogger(...args) {
+    console.group(name);
+    for (let arg of args) console.log(arg);
+    console.groupEnd(name);
   }
 }
 
