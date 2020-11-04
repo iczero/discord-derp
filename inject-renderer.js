@@ -42,6 +42,7 @@ const resolvedModules = resolveModules({
   react: m => typeof m.version === 'string' && m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED,
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
+  superagent: m => typeof m === 'function' && typeof m.get === 'function' && typeof m.post === 'function',
   api: m => m.default && typeof m.default.APIError === 'function',
   users: m => m.default && typeof m.default.getUsers === 'function',
   channels: m => m.default && typeof m.default.getChannels === 'function',
@@ -56,6 +57,7 @@ const resolvedModules = resolveModules({
 
 const { Endpoints, ActionTypes } = resolvedModules.data;
 const dispatcher = resolvedModules.dispatcher.default;
+const superagent = resolvedModules.superagent;
 const api = resolvedModules.api.default;
 const GatewaySocket = resolvedModules.gateway.default;
 const EventEmitter = resolvedModules.events.EventEmitter
@@ -101,6 +103,15 @@ dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
   currentGuild = event.guildId;
   currentChannel = event.channelId;
 });
+function switchToChannel(id) {
+  let channel = channelRegistry.getChannel(id);
+  if (!channel) throw new Error('channel not found');
+  dispatcher.dispatch({
+    type: ActionTypes.CHANNEL_SELECT,
+    guildId: channel.guild_id,
+    channelId: channel.id
+  });
+}
 
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
@@ -142,7 +153,7 @@ class Deferred {
 /** Slowmode handler */
 class SlowmodeQueue {
   constructor() {
-    /** @type {Map<string, { channelId: string, body: any, deferred: Deferred }[]>} */
+    /** @type {Map<string, { channelId: string, body: any, deferred: Deferred, retry: number }[]>} */
     this.channelQueues = new Map();
     /** @type {Map<string, number>} */
     this.slowmodeTimers = new Map();
@@ -177,7 +188,7 @@ class SlowmodeQueue {
   /**
    * Enqueue a message
    * @param {string} channelId
-   * @param {object} body
+   * @param {any} body
    * @return {Promise<any>}
    */
   enqueue(channelId, body) {
@@ -190,7 +201,7 @@ class SlowmodeQueue {
       shouldSchedule = true;
     }
     let deferred = new Deferred();
-    queue.unshift({ channelId, body, deferred });
+    queue.unshift({ channelId, body, deferred, retry: 0 });
     if (shouldSchedule) {
       if (delay) setTimeout(() => this.drain(channelId), delay);
       else this.drain(channelId);
@@ -214,11 +225,14 @@ class SlowmodeQueue {
     }
     let top = queue.pop();
     if (!top) return;
+    let body = top.body;
+    if (typeof body === 'function') body = body(top.retry);
     let result;
     try {
-      result = await sendMessageDirect(channelId, top.body);
+      result = await sendMessageDirect(channelId, body);
     } catch (err) {
       if (err.status === 429 && err.body.code === 20016) {
+        top.retry++;
         queue.push(top);
         setTimeout(() => this.drain(channelId), err.body.retry_after * 1000);
         return;
@@ -245,21 +259,33 @@ class SlowmodeQueue {
 
 let slowmodeQueue = new SlowmodeQueue();
 
-// start slowmode cooldown on self message
+/** @type {Map<string, (apiReturnTime: number) => void>} */
+let pingInfo = new Map();
 gatewayEvents.on('MESSAGE_CREATE', event => {
   if (event.author.id === userRegistry.getCurrentUser().id) {
+    // start slowmode cooldown on self message
     slowmodeQueue.restartCooldown(event.channel_id);
+
+    // gateway ping time tracking
+    let pingMatch = event.content.match(/^\(ping (\w+)\)$/);
+    if (pingMatch) {
+      let id = pingMatch[1];
+      let callback = pingInfo.get(id);
+      if (callback) callback(Date.now());
+    }
   }
 });
 
 /**
  * Send a message to a channel
  * @param {string} channel Channel id
- * @param {object} body Message body
+ * @param {object | function} body Message body
  */
 async function sendMessage(channel, body) {
-  if (!slowmodeQueue.shouldQueue(channel)) return await sendMessageDirect(channel, body);
-  else return await slowmodeQueue.enqueue(channel, body);
+  if (!slowmodeQueue.shouldQueue(channel)) {
+    if (typeof body === 'function') body = body(0);
+    return await sendMessageDirect(channel, body);
+  } else return await slowmodeQueue.enqueue(channel, body);
 }
 
 /**
@@ -342,6 +368,14 @@ function truncateLinesArray(lines, maxLength = 2000) {
   return truncatedArray.join('\n');
 }
 
+function arrayEquals(a1, a2) {
+  if (a1.length !== a2.length) return false;
+  for (let i = 0; i < a1.length; i++) {
+    if (a1[i] !== a2[i]) return false;
+  }
+  return true;
+}
+
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
@@ -376,6 +410,41 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       } else await sendMessage(event.channel_id, { content: '?' });
       break;
     }
+    case 'restart': {
+      if (event.author.id !== userRegistry.getCurrentUser().id) return;
+      window.DiscordNative.app.relaunch();
+      break;
+    }
+    case 'ping': {
+      let id = generateNonce();
+      let gatewayDeferred = new Deferred();
+      pingInfo.set(id, gatewayDeferred.resolve);
+      let startDate = new Date();
+      let sendTs;
+      let apiReturnTs;
+      let [sent, gatewayReturnTs] = await Promise.all([
+        sendMessage(event.channel_id, () => {
+          sendTs = Date.now();
+          return { content: `(ping ${id})` };
+        }).then(result => {
+          apiReturnTs = Date.now();
+          return result;
+        }),
+        gatewayDeferred.promise
+      ]);
+      let endTs = Date.now();
+      let startTs = +startDate;
+      let serverTs = +new Date(sent.body.timestamp);
+      pingInfo.delete(id);
+      let out = [
+        `(ping ${id})`,
+        `**Total latency** (including slowmode, if applicable): ${endTs - startTs} ms`,
+        `**API timings**: rtt ${apiReturnTs - sendTs} ms, send ${serverTs - sendTs} ms, return ${apiReturnTs - serverTs} ms`,
+        `**Gateway timings**: rtt ${gatewayReturnTs - sendTs} ms, return ${gatewayReturnTs - serverTs} ms`,
+      ];
+      await editMessage(event.channel_id, sent.body.id, { content: out.join('\n') });
+      break;
+    }
     case 'annoy': {
       let mentions = event.mentions;
       if (!mentions.length) break;
@@ -385,6 +454,14 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
       ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
       await sendMessage(event.channel_id, { content: ntt });
+      break;
+    }
+    case 'getavatar': {
+      let mentions = event.mentions;
+      if (!mentions.length) break;
+      let target = mentions[0].id;
+      let user = userRegistry.getUser(target);
+      await sendMessage(event.channel_id, { content: 'URL: ' + user.getAvatarURL() });
       break;
     }
     case 'wa': {
@@ -531,6 +608,110 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       }
 
       await editMessage(event.channel_id, messageId, { embed });
+      break;
+    }
+    case 'cross': {
+      // but why am i doing this
+      // todo: lift functions or something idk
+      /**
+       * Parse genotype
+       * @param {string} s
+       * @return {{ error: string} | { error: null, split: string[], alleles: string[], gametes: string[] }}
+       */
+      function parseGenotype(s) {
+        if (!s.length) return { error: 'empty genotype' };
+        if (s.length % 2) return { error: 'genotype length must be a multiple of 2' };
+        /** @type {string} */
+        let split = [];
+        for (let i = 0; i < s.length; i += 2) split.push(s.slice(i, i + 2));
+        /** @type {string} */
+        let alleles = [];
+        for (let pair of split) {
+          if (pair[0].toLowerCase() !== pair[1].toLowerCase()) {
+            return { error: `pair ${pair} does not match` };
+          }
+          alleles.push(pair[0].toLowerCase());
+        }
+        // abusing binary to generate permutations
+        let gametes = new Set();
+        for (let select = 0; select < 2 ** split.length; select++) {
+          let gamete = [];
+          for (let i = 0; i < split.length; i++) {
+            gamete.push(split[i][(select >> i) & 1]);
+          }
+          gametes.add(gamete.join(''));
+        }
+        return { error: null, split, alleles, gametes: [...gametes] };
+      }
+      /**
+       * Normalize allele pair (aA -> Aa)
+       * @param {string[]} s
+       */
+      function normalizePair(s) {
+        if (s[0] === s[0].toUpperCase()) return [s[0], s[1]];
+        else return [s[1], s[0]];
+      }
+      if (args.length < 3) {
+        await sendMessage(event.channel_id, { content: 'must cross 2 things' });
+        return;
+      }
+      let genotype1 = parseGenotype(args[1]);
+      if (genotype1.error) {
+        await sendMessage(event.channel_id, { content: 'genotype 1 error: ' + genotype1.error });
+        return;
+      }
+      let genotype2 = parseGenotype(args[2]);
+      if (genotype2.error) {
+        await sendMessage(event.channel_id, { content: 'genotype 2 error: ' + genotype2.error });
+        return;
+      }
+      if (Math.max(genotype1.alleles.length, genotype2.alleles.length) > 3) {
+        await sendMessage(event.channel_id, { content: 'too many alleles (blame message limit)' });
+        return;
+      }
+      if (!arrayEquals(genotype1.alleles, genotype2.alleles)) {
+        await sendMessage(event.channel_id, { content: 'genotype alleles do not match' });
+        return;
+      }
+      let table = new Array(genotype1.gametes.length).fill(null);
+      for (let i = 0; i < table.length; i++) {
+        table[i] = new Array(genotype2.gametes.length).fill(null);
+      }
+      /** @type {Map<string, number>} */
+      let genotypeFrequencies = new Map();
+      let total = genotype1.gametes.length * genotype2.gametes.length;
+      for (let row = 0; row < table.length; row++) {
+        for (let col = 0; col < table[row].length; col++) {
+          let genotype = [];
+          for (let i = 0; i < genotype1.alleles.length; i++) {
+            genotype.push(normalizePair([genotype1.gametes[row][i], genotype2.gametes[col][i]]).join(''));
+          }
+          let combined = genotype.join('');
+          table[row][col] = combined;
+          let freq = genotypeFrequencies.get(combined);
+          if (!freq) genotypeFrequencies.set(combined, 1);
+          else genotypeFrequencies.set(combined, freq + 1);
+        }
+      }
+      log('polyhybrid:', table, genotypeFrequencies);
+      let prettyTable = [];
+      let g1 = genotype1.gametes;
+      let g2 = genotype2.gametes;
+      let al = genotype1.alleles.length;
+      // column header
+      prettyTable.push(`${' '.repeat(al)} | ${g2.join(' '.repeat(al + 1))}`);
+      // separator
+      prettyTable.push(`${'-'.repeat(al)}-+-${'-'.repeat((al * 2 + 1) * genotype1.gametes.length)}`);
+      // rows
+      for (let [i, row] of table.entries()) {
+        prettyTable.push(`${g1[i]} | ${row.join(' ')}`);
+      }
+      let freqInfo = [...genotypeFrequencies]
+        .sort(([, v1], [, v2]) => v2 - v1)
+        .map(([key, value]) => `${key}: ${value}/${total} (${(value / total * 100).toFixed(2)}%)`)
+        .join('\n');
+      await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
+      break;
     }
   }
 });
