@@ -128,23 +128,37 @@ let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
  * @param {object} body Message body
  */
 function sendMessageDirect(channel, body) {
- return new Promise((resolve, reject) => {
-   messageQueue.enqueue({
-     type: MessageDataType.SEND,
-     message: {
-       channelId: channel,
-       nonce: generateNonce(),
-       tts: false,
-       ...body
-     }
-   }, result => {
-    if (!result.ok) {
-      messageActions.sendBotMessage(currentChannel, '**Warning**: send message failed: ```json\n' +
-        JSON.stringify(result, null, 2) + '\n```');
-      reject(result);
-    } else resolve(result);
-   });
- });
+  return new Promise((resolve, reject) => {
+    let message = {
+      channelId: channel,
+      nonce: generateNonce(),
+      tts: false,
+      ...body
+    };
+    if (typeof message.onSend === 'function') {
+      // hacky queue send handler
+      let onSend = message.onSend;
+      delete message.onSend;
+      delete message.channelId;
+      Object.defineProperty(message, 'channelId', {
+        enumerable: true,
+        get() {
+          onSend();
+          return channel;
+        }
+      })
+    }
+    messageQueue.enqueue({
+      type: MessageDataType.SEND,
+      message
+    }, result => {
+      if (!result.ok) {
+        messageActions.sendBotMessage(currentChannel, '**Warning**: send message failed: ```json\n' +
+          JSON.stringify(result, null, 2) + '\n```');
+        reject(result);
+      } else resolve(result);
+    });
+  });
 }
 
 class Deferred {
@@ -429,9 +443,9 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       let sendTs;
       let apiReturnTs;
       let [sent, gatewayReturnTs] = await Promise.all([
-        sendMessage(event.channel_id, () => {
-          sendTs = Date.now();
-          return { content: `(ping ${id})` };
+        sendMessage(event.channel_id, {
+          content: `(ping ${id})`,
+          onSend: () => sendTs = Date.now()
         }).then(result => {
           apiReturnTs = Date.now();
           return result;
@@ -444,7 +458,7 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       pingInfo.delete(id);
       let out = [
         `(ping ${id})`,
-        `**Total latency** (including slowmode, if applicable): ${endTs - startTs} ms`,
+        `**Total latency** (including queues): ${endTs - startTs} ms`,
         `**API timings**: rtt ${apiReturnTs - sendTs} ms, send ${serverTs - sendTs} ms, return ${apiReturnTs - serverTs} ms`,
         `**Gateway timings**: rtt ${gatewayReturnTs - sendTs} ms, return ${gatewayReturnTs - serverTs} ms`,
       ];
