@@ -33,6 +33,12 @@ function resolveModules(def) {
       }
     }
   }
+  if (needed.size) {
+    throw new Error([
+      'Failed to resolve the following modules:',
+      ...needed
+    ].join('\n'));
+  }
   return found;
 }
 
@@ -45,7 +51,7 @@ const resolvedModules = resolveModules({
   superagent: m => typeof m === 'function' && typeof m.get === 'function' && typeof m.post === 'function',
   api: m => m.default && typeof m.default.APIError === 'function',
   users: m => m.default && typeof m.default.getUsers === 'function',
-  channels: m => m.default && typeof m.default.getChannels === 'function',
+  channels: m => m.default && typeof m.default.getChannel === 'function',
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
@@ -449,11 +455,17 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       let mentions = event.mentions;
       if (!mentions.length) break;
       let target = mentions[0].id;
-      let ntt = `<@${target}> `;
+      let ntt = `<@${target}>`;
       if (ntt.length > 25) break;
       ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
       ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
       await sendMessage(event.channel_id, { content: ntt });
+      break;
+    }
+    case 'rms':
+    case 'proprietary': {
+      // ABSOLUTELY PROPRIETARY
+      await sendMessage(event.channel_id, { content: 'https://i.redd.it/7ozal346p6kz.png' });
       break;
     }
     case 'getavatar': {
