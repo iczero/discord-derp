@@ -58,7 +58,9 @@ const resolvedModules = resolveModules({
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
   messages: m => m.default && typeof m.default.getMessages === 'function',
   messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
-  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover
+  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
+  media: m => m.default && typeof m.default.getMediaEngine === 'function',
+  rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function'
 });
 
 const { Endpoints, ActionTypes } = resolvedModules.data;
@@ -129,12 +131,29 @@ let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
  */
 function sendMessageDirect(channel, body) {
   return new Promise((resolve, reject) => {
-    let message = {
-      channelId: channel,
-      nonce: generateNonce(),
-      tts: false,
-      ...body
-    };
+    let message;
+    if (body.file) {
+      message = {
+        channelId: channel,
+        file: body.file,
+        filename: body.filename
+      };
+      if (body.onSend) message.onSend = body.onSend;
+      // "remove" fields
+      let payload = Object.assign({}, body, {
+        file: undefined,
+        filename: undefined,
+        onSend: undefined
+      });
+      message.payload_json = JSON.stringify(payload);
+    } else {
+      message = {
+        channelId: channel,
+        nonce: generateNonce(),
+        tts: false,
+        ...body
+      };
+    }
     if (typeof message.onSend === 'function') {
       // hacky queue send handler
       let onSend = message.onSend;
@@ -153,8 +172,11 @@ function sendMessageDirect(channel, body) {
       message
     }, result => {
       if (!result.ok) {
-        messageActions.sendBotMessage(currentChannel, '**Warning**: send message failed: ```json\n' +
-          JSON.stringify(result, null, 2) + '\n```');
+        messageActions.sendBotMessage(currentChannel,
+          `**Warning**: send message to channel ${message.channelId} failed` + 
+          '```json\n// sent message\n' + JSON.stringify(body, null, 2) + '\n```' + 
+          '```json\n// server response\n' + JSON.stringify(result, null, 4) + '\n```'
+        );
         reject(result);
       } else resolve(result);
     });
@@ -396,6 +418,8 @@ function arrayEquals(a1, a2) {
   return true;
 }
 
+// await sendMessage(currentChannel, { content: 'test', file: new Blob([new Uint8Array([4, 5, 6, 7])]), filename: 'test.bin' })
+
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
@@ -469,6 +493,7 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       let mentions = event.mentions;
       if (!mentions.length) break;
       let target = mentions[0].id;
+      if (Math.random() < 0.05) target = event.author.id;
       let ntt = `<@${target}>`;
       if (ntt.length > 25) break;
       ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
@@ -487,7 +512,9 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       if (!mentions.length) break;
       let target = mentions[0].id;
       let user = userRegistry.getUser(target);
-      await sendMessage(event.channel_id, { content: 'URL: ' + user.getAvatarURL() });
+      let url = new URL(user.getAvatarURL());
+      url.searchParams.set('size', '512');
+      await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
       break;
     }
     case 'wa': {

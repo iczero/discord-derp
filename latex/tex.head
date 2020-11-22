@@ -1,0 +1,7 @@
+\documentclass[preview]{standalone}
+\usepackage{varwidth}
+\usepackage{amsmath}
+\usepackage[version=4]{mhchem}
+\begin{document}
+\begin{varwidth}{250pt}
+
