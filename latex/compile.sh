@@ -3,4 +3,4 @@
 set -xe
 
 timeout 15s latex --no-shell-escape -interaction=batchmode input.tex
-dvipng -bg Transparent -fg 'rgb 1.0 1.0 1.0' -D 192 input.dvi -o output.png
+dvipng -bg Transparent -fg 'rgb 1.0 1.0 1.0' -D 192 input.dvi -o output.png >> input.log 2>&1
