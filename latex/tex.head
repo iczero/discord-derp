@@ -2,6 +2,7 @@
 \usepackage{varwidth}
 \usepackage{amsmath}
 \usepackage[version=4]{mhchem}
+\usepackage[T1]{fontenc}
 \begin{document}
 \begin{varwidth}{250pt}
 

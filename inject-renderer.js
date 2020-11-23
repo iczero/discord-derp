@@ -766,5 +766,19 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
       break;
     }
+    case 'math':
+    case 'tex': {
+      let input = args.slice(1).join(' ');
+      let codeblockMatch = input.match(/`{3}(?:la)?tex\n(.+?)`{3}/s);
+      if (codeblockMatch) input = codeblockMatch[1];
+      if (args[0] === 'math') input = `\\[\n${input}\n\\]`;
+      let result = await inject.makeLatexImage(input);
+      let blob = new Blob([result.output]);
+      if (!result.error) {
+        await sendMessage(event.channel_id, { file: blob, filename: 'latex.png' });
+      } else {
+        await sendMessage(event.channel_id, { content: 'An error occurred', file: blob, filename: 'error.txt' });
+      }
+    }
   }
 });

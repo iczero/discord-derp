@@ -1,6 +1,8 @@
 const electron = require('electron');
 const path = require('path');
 const fsP = require('fs').promises;
+const childProcess = require('child_process');
+const EventEmitter = require('events');
 
 const log = (...args) => console.log('inject-preload:', ...args);
 
@@ -48,6 +50,27 @@ if (window.opener === null) {
     await response.promise;
     return response;
   };
+}
+
+{
+  async function makeLatexImage(source) {
+    let scriptPath = path.join(__dirname, 'latex', 'make-image.sh');
+    let proc = childProcess.spawn(scriptPath, {
+      stdio: ['pipe', 'pipe', 'inherit']
+    });
+    proc.stdin.write(source);
+    let outputBuffers = [];
+    proc.stdout.on('data', d => outputBuffers.push(d));
+    // ?????
+    setImmediate(() => proc.stdin.end());
+    await EventEmitter.once(proc, 'exit');
+    let error = proc.exitCode !== 0;
+    return {
+      error,
+      output: new Uint8Array(Buffer.concat(outputBuffers))
+    }
+  }
+  injectExports.makeLatexImage = makeLatexImage;
 }
 
 electron.contextBridge.exposeInMainWorld('inject', injectExports);
