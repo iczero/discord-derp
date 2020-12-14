@@ -49,10 +49,13 @@ const resolvedModules = resolveModules({
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
   superagent: m => typeof m === 'function' && typeof m.get === 'function' && typeof m.post === 'function',
+  componentDispatch: m => typeof m.ComponentDispatch === 'object',
   api: m => m.default && typeof m.default.APIError === 'function',
   users: m => m.default && typeof m.default.getUsers === 'function',
   channels: m => m.default && typeof m.default.getChannel === 'function',
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
+  guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
+  guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
@@ -63,9 +66,10 @@ const resolvedModules = resolveModules({
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function'
 });
 
-const { Endpoints, ActionTypes } = resolvedModules.data;
+const { Endpoints, ActionTypes, ComponentActions } = resolvedModules.data;
 const dispatcher = resolvedModules.dispatcher.default;
 const superagent = resolvedModules.superagent;
+const ComponentDispatch = resolvedModules.componentDispatch.ComponentDispatch;
 const api = resolvedModules.api.default;
 const GatewaySocket = resolvedModules.gateway.default;
 const EventEmitter = resolvedModules.events.EventEmitter
@@ -74,21 +78,55 @@ const ReactDOM = resolvedModules.reactDOM;
 const userRegistry = resolvedModules.users.default;
 const channelRegistry = resolvedModules.channels.default;
 const guildRegistry = resolvedModules.guilds.default;
+const guildMemberRegistry = resolvedModules.guildMembers.default;
+const guildMemberCountRegistry = resolvedModules.guildMemberCount.default;
 const messageRegistry = resolvedModules.messages.default;
 const messageActions = resolvedModules.messageActions.default;
 const messageQueue = resolvedModules.messageQueue.default;
 const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 
-/*
+// late load modules
+let messageHooks = null;
+let replyHandler = null;
+let setUnreadPosition = null;
+
 function lateResolveModules() {
   log('resolving late modules');
   Object.assign(resolvedModules, resolveModules({
-    slowmode: m => m.default && typeof m.default.getSlowmodeCooldownGuess === 'function'
+    messageHooks: m => typeof m.useClickMessage === 'function',
+    replyHandler: m => typeof m.createPendingReply === 'function',
+    // this has got to be the hackiest one yet
+    setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/)
   }));
 
-  slowmode = resolvedModules.slowmode.default;
+  messageHooks = resolvedModules.messageHooks;
+  replyHandler = resolvedModules.replyHandler;
+  setUnreadPosition = resolvedModules.setUnreadPosition.default;
+
+  // monkey-patch messageHooks.useClickMessage
+  // let oldUseClickMessage = messageHooks.useClickMessage;
+  messageHooks.useClickMessage = function patchedUseClickMessage(message, channel) {
+    // message and channel are objects, not ids
+    return React.useCallback(event => {
+      if (event.altKey) {
+        event.preventDefault();
+        // original functionality (alt-click to set unread position)
+        setUnreadPosition(channel.id, message.id);
+      } else if (event.ctrlKey) {
+        event.preventDefault();
+        // reply on ctrl-click, disable mention by default
+        replyHandler.createPendingReply({
+          channel,
+          message,
+          shouldMention: false,
+          showMentionToggle: true
+        });
+        // focus text area
+        ComponentDispatch.dispatch(ComponentActions.TEXTAREA_FOCUS);
+      }
+    }, [message.id, channel.id]);
+  }
 }
-*/
 
 let gatewayEvents = new EventEmitter();
 
@@ -100,7 +138,7 @@ GatewaySocket.prototype.connect = function connect() {
   log('intercepted GatewaySocket.connect');
   gatewaySocket = this;
   gatewayConnectOriginal.call(this);
-  // lateResolveModules();
+  lateResolveModules();
   gatewaySocket.on('dispatch', (event, ...args) => gatewayEvents.emit(event, ...args));
 }
 
@@ -418,30 +456,25 @@ function arrayEquals(a1, a2) {
   return true;
 }
 
-// await sendMessage(currentChannel, { content: 'test', file: new Blob([new Uint8Array([4, 5, 6, 7])]), filename: 'test.bin' })
-
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
 const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639']);
-const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands']);
+const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override']);
 const MESSAGE_MAX_LENGTH = 2000;
 const EMBED_MAX_LENGTH = 2000;
 const EMBED_MAX_FIELDS = 25;
 const EMBED_FIELD_NAME_MAX_LENGTH = 256;
 const EMBED_FIELD_VALUE_MAX_LENGTH = 1024;
-gatewayEvents.on('MESSAGE_CREATE', async event => {
-  if (!enableCommands) return;
-  let channel = channelRegistry.getChannel(event.channel_id);
-  if (!channel) return;
-  let messageSplit = event.content.split(' ');
-  let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
-  if (!ALLOWED_GUILDS.has(event.guild_id)) {
-    if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
-  }
-  if (!event.content.startsWith(PREFIX)) return;
+
+async function runCommand(args, event) {
   log('command:', args[0], event);
   switch (args[0].toLowerCase()) {
+    case 'override': {
+      if (event.author.id !== userRegistry.getCurrentUser().id) return;
+      runCommand(args.slice(1), event);
+      break;
+    }
     case 'guildcommands': {
       if (event.author.id !== userRegistry.getCurrentUser().id) return;
       let subcommand = args[1].toLowerCase();
@@ -781,4 +814,17 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
       }
     }
   }
+}
+
+gatewayEvents.on('MESSAGE_CREATE', async event => {
+  if (!enableCommands) return;
+  let channel = channelRegistry.getChannel(event.channel_id);
+  if (!channel) return;
+  let messageSplit = event.content.split(' ');
+  let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
+  if (!ALLOWED_GUILDS.has(event.guild_id)) {
+    if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
+  }
+  if (!event.content.startsWith(PREFIX)) return;
+  runCommand(args, event);
 });
