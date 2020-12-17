@@ -89,6 +89,9 @@ const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 let messageHooks = null;
 let replyHandler = null;
 let setUnreadPosition = null;
+let commands = null;
+let ApplicationCommandType = null;
+let ApplicationCommandOptionType = null;
 
 function lateResolveModules() {
   log('resolving late modules');
@@ -96,12 +99,16 @@ function lateResolveModules() {
     messageHooks: m => typeof m.useClickMessage === 'function',
     replyHandler: m => typeof m.createPendingReply === 'function',
     // this has got to be the hackiest one yet
-    setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/)
+    setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
+    commands: m => typeof m.getBuiltInCommands === 'function',
+    commandTypes: m => typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
   }));
 
   messageHooks = resolvedModules.messageHooks;
   replyHandler = resolvedModules.replyHandler;
   setUnreadPosition = resolvedModules.setUnreadPosition.default;
+  commands = resolvedModules.commands;
+  ({ ApplicationCommandType, ApplicationCommandOptionType } = resolvedModules.commandTypes);
 
   // monkey-patch messageHooks.useClickMessage
   // let oldUseClickMessage = messageHooks.useClickMessage;
@@ -125,7 +132,7 @@ function lateResolveModules() {
         ComponentDispatch.dispatch(ComponentActions.TEXTAREA_FOCUS);
       }
     }, [message.id, channel.id]);
-  }
+  };
 }
 
 let gatewayEvents = new EventEmitter();
