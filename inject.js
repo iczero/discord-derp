@@ -43,8 +43,21 @@ Object.defineProperty(electronModule, 'exports', {
           log('created window does not match title', MAIN_WINDOW_TITLE);
         }
         super(opts);
-        // store the main window for later
-        if (isMainWindow) mainWindow = this;
+        if (isMainWindow) {
+          // store the main window for later
+          mainWindow = this;
+          // install custom error handler
+          this.webContents.on('crashed', (_event, killed) => {
+            // so usually you'd expect event to contain details about why everything
+            // is on fire, but in this case, for some reason, it doesn't.
+            // the following code is pretty much useless
+            if (killed) {
+              log('main window killed');
+              return;
+            }
+            console.error('inject: main window crashed!');
+          });
+        }
       }
     }
     exports.BrowserWindow = BrowserWindow;
@@ -84,10 +97,11 @@ const REACT_DEVTOOLS_EXTENSION_ID = 'fmkadmapgofadopljbjfkapdkoienihi';
 
   let version = versions[versions.length - 1];
   let extensionPath = path.join(extensionDir, version);
-  if (electron.BrowserWindow.addDevToolsExtension(extensionPath)) {
+  try {
+    await electron.session.defaultSession.loadExtension(extensionPath);
     log('loaded react devtools, version', version);
-  } else {
-    log('failed to load react devtools');
+  } catch (err) {
+    log('failed to load react devtools: ', err);
   }
 })();
 
@@ -99,6 +113,21 @@ module.exports = require('discord_desktop_core/core.asar');
 // the require path for renderer processes
 electron.ipcMain.on('INJECT_GET_CORE_MODULE_PATH', event => {
   event.returnValue = path.dirname(require.resolve('discord_desktop_core'))
+});
+
+// crash handling because electron sucks at handling crashes
+electron.ipcMain.on('INJECT_HANDLE_CRASH', (event, error) => {
+  console.error('\ninject: ======================================');
+  console.error('inject: main window crashed!');
+  console.error(error);
+  console.error('');
+  event.returnValue = null;
+});
+electron.ipcMain.on('INJECT_LOG_CRASH', (event, error) => {
+  console.error('inject: crash stack trace');
+  console.error(error);
+  console.error('');
+  event.returnValue = null;
 });
 
 {

@@ -268,8 +268,13 @@ class SlowmodeQueue {
    * @param {string} channelId
    */
   shouldQueue(channelId) {
-    let channel = this.channelQueues.get(channelId);
-    return this.queryCooldown(channelId) > 0 || (channel && !channel.length);
+    let hasQueue = typeof this.channelQueues.get(channelId) !== 'undefined';
+    let shouldQueue = hasQueue || this.queryCooldown(channelId) > 0;
+    if (!shouldQueue && channelRegistry.getChannel(channelId).rateLimitPerUser) {
+      // if bypassing queue on slowmoded channel, ensure next message will be queued
+      this.restartCooldown(channelId);
+    }
+    return shouldQueue;
   }
 
   /**
@@ -329,8 +334,6 @@ class SlowmodeQueue {
 
     if (!queue.length) this.channelQueues.delete(channelId);
     let ratelimit = channelRegistry.getChannel(channelId).rateLimitPerUser * 1000;
-    // inform ui
-    dispatcher.dispatch({ type: ActionTypes.SLOWMODE_START_COOLDOWN, channelId });
     if (queue.length) setTimeout(() => this.drain(channelId), ratelimit);
   }
 
@@ -352,6 +355,11 @@ gatewayEvents.on('MESSAGE_CREATE', event => {
   if (event.author.id === userRegistry.getCurrentUser().id) {
     // start slowmode cooldown on self message
     slowmodeQueue.restartCooldown(event.channel_id);
+    // inform ui as well
+    dispatcher.dispatch({
+      type: ActionTypes.SLOWMODE_START_COOLDOWN,
+      channelId: event.channel_id
+    });
 
     // gateway ping time tracking
     let pingMatch = event.content.match(/^\(ping (\w+)\)$/);
@@ -463,6 +471,65 @@ function arrayEquals(a1, a2) {
   return true;
 }
 
+/** stupid semaphore(?) implementation */
+class PossiblySemaphore {
+  // is this thing even called a semaphore?
+  constructor(maxCount = 1) {
+    this.maxCount = maxCount;
+    this.executing = 0;
+    /** @type {Deferred[]} */
+    this.queue = [];
+  }
+
+  /**
+   * Try locking but return immediately if not available
+   * @return {boolean} Whether a lock was acquired successfully
+   */
+  tryAcquire() {
+    if (this.executing < this.maxCount) {
+      this.executing++;
+      return true;
+    } else return false;
+  }
+
+  /** Acquire lock, blocking (asynchronously) until available */
+  async acquire() {
+    if (this.tryAcquire()) return;
+    let deferred = new Deferred();
+    this.queue.unshift(deferred);
+    await deferred.promise;
+    // acquire not needed
+    return;
+  }
+
+  async execute(fn) {
+    try {
+      await this.acquire();
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+
+  release() {
+    if (this.executing <= 0) throw new Error('release called too many times?');
+    if (this.executing <= this.maxCount) {
+      let nextTask = this.queue.pop();
+      if (nextTask) {
+        nextTask.resolve();
+      } else {
+        this.executing--;
+      }
+    } else {
+      this.executing--;
+    }
+  }
+}
+
+function randomArrayElement(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
@@ -473,6 +540,27 @@ const EMBED_MAX_LENGTH = 2000;
 const EMBED_MAX_FIELDS = 25;
 const EMBED_FIELD_NAME_MAX_LENGTH = 256;
 const EMBED_FIELD_VALUE_MAX_LENGTH = 1024;
+const WOLFRAMALPHA_LOADING_MESSAGES = [
+  '> Did you know that you can also use your brain to calculate stuff?\n - Bowserinator',
+  '> Pretending to understand what you meant...\n - iczero',
+  '> Converting 1 dog to joules...\n - iovoid',
+  '> Calculating calories in 1 cubic light-year of ice cream...\n - Bowserinator',
+  '> This loading message is totally not `sleep(1000)`\n - Bowserinator',
+  '> Connecting to BWBellairs\'s home network...\n - Bowserinator',
+  '> Mangling your query...\n - iovoid',
+  '> Introducing artifical latency to the internet...\n - Bowserinator',
+  '> Calculating your weight in eV...\n - iovoid',
+  '> Asking ISP why this query is taking so long...\n - Bowserinator',
+  '> Re-deriving all of modern mathematics...\n - Bowserinator',
+  '> CAPTCHA check: leave the server to prove you are a human (/s)\n - Bowserinator',
+  '> Teaching chess to WolframAlpha...\n - iovoid',
+  '> Giving WolframAlpha access to a DNA printer...\n - iovoid',
+  '> Preparing to paste a very large amount of text...\n - iczero',
+];
+
+// for some... reason, the wolframalpha thing cannot be run twice at the same time
+// or discord will commit suicide by SIGILL
+let wolframAlphaQueryLock = new PossiblySemaphore(1);
 
 async function runCommand(args, event) {
   log('command:', args[0], event);
@@ -559,31 +647,50 @@ async function runCommand(args, event) {
     }
     case 'wa': {
       let query = args.slice(1).join(' ').replace(/\n/g, ' ');
-      let promise = inject.wolframAlphaQuery(query);
-
       let user = userRegistry.getUser(event.author.id);
       let avatarURL = user.getAvatarURL();
       let username = user.username;
       let displayedQuery = query;
       if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
+      let sent = null;
+      let queryUrl = new URL('https://www.wolframalpha.com/input');
+      queryUrl.searchParams.set('i', query);
       let embed = {
-        title: 'WolframAlpha: ' + displayedQuery,
-        description: 'Running...',
+        author: {
+          name: 'WolframAlpha: ' + displayedQuery,
+          url: queryUrl.href,
+          icon_url: 'https://hellomouse.net/static/wolframalpha.png'
+        },
+        title: '[iczero cannot write code]',
+        description: '[insert funny placeholder text here]',
         timestamp: (new Date()).toISOString(),
         footer: {
           icon_url: avatarURL,
           text: username
         },
-        color: 0x2decfa
+        color: 0x000000
       };
-      let sent = await sendMessage(event.channel_id, { embed });
+      let updateLoadState = async (text, color) => {
+        embed.title = text;
+        embed.description = randomArrayElement(WOLFRAMALPHA_LOADING_MESSAGES);
+        embed.timestamp = (new Date()).toISOString();
+        embed.color = color;
+        if (sent) await editMessage(event.channel_id, messageId, { embed });
+      };
+      updateLoadState('waiting for semaphore', 0xffff00);
+      let promise = wolframAlphaQueryLock.execute(async () => {
+        updateLoadState('Running...', 0x2decfa);
+        return await inject.wolframAlphaQuery(query);
+      });
+      sent = await sendMessage(event.channel_id, { embed });
       let messageId = sent.body.id;
       
       let response = await promise;
       log('wolframalpha response:', response);
 
-      let baseMessageLength = embed.title.length + username.length;
+      let baseMessageLength = embed.author.name.length + username.length;
       process: {
+        embed.title = null;
         if (response.failed) {
           embed.color = 0xff0000;
           embed.description = '**No results**';
@@ -833,5 +940,9 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
     if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
   }
   if (!event.content.startsWith(PREFIX)) return;
-  runCommand(args, event);
+  try {
+    runCommand(args, event);
+  } catch (err) {
+    log('error running command!', args, err);
+  }
 });

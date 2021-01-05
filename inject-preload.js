@@ -16,7 +16,19 @@ let injectRenderer = fsP.readFile(path.join(__dirname, 'inject-renderer.js'))
 const CORE_MODULE_PATH = electron.ipcRenderer.sendSync('INJECT_GET_CORE_MODULE_PATH');
 log('core module path', CORE_MODULE_PATH);
 
+function handleCrash(err) {
+  electron.ipcRenderer.sendSync('INJECT_HANDLE_CRASH', err);
+  electron.ipcRenderer.sendSync('INJECT_LOG_CRASH', err.stack);
+  throw err;
+}
+
+process.on('uncaughtException', handleCrash);
+process.on('unhandledRejection', handleCrash);
+
 // prevent discord from deleting your token when opening devtools
+// OBVIOUS WARNING THAT YOU SHOULD *NEVER* BE PASTING RANDOM UNKNOWN CODE INTO
+// DEVTOOLS IF YOU DO NOT KNOW WHAT YOU ARE DOING
+// YES, EVEN THIS THING
 let discordNativeWindow = require(path.join(CORE_MODULE_PATH,
     'core.asar/app/discord_native/renderer/window.js'));
 discordNativeWindow.setDevtoolsCallbacks = () => {
