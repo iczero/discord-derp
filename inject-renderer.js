@@ -270,11 +270,26 @@ class SlowmodeQueue {
   shouldQueue(channelId) {
     let hasQueue = typeof this.channelQueues.get(channelId) !== 'undefined';
     let shouldQueue = hasQueue || this.queryCooldown(channelId) > 0;
+    return shouldQueue;
+  }
+
+  /**
+   * Send a message to a channel, or queue if necessary
+   * @param {string} channelId Channel id
+   * @param {object | function} body Message body
+   * @return {Promise<any>}
+   */
+  async sendOrEnqueue(channelId, body) {
+    let shouldQueue = this.shouldQueue(channelId);
     if (!shouldQueue && channelRegistry.getChannel(channelId).rateLimitPerUser) {
       // if bypassing queue on slowmoded channel, ensure next message will be queued
       this.restartCooldown(channelId);
     }
-    return shouldQueue;
+
+    if (!shouldQueue) {
+      if (typeof body === 'function') body = body(0);
+      return await sendMessageDirect(channelId, body);
+    } else return await slowmodeQueue.enqueue(channelId, body);
   }
 
   /**
@@ -371,17 +386,8 @@ gatewayEvents.on('MESSAGE_CREATE', event => {
   }
 });
 
-/**
- * Send a message to a channel
- * @param {string} channel Channel id
- * @param {object | function} body Message body
- */
-async function sendMessage(channel, body) {
-  if (!slowmodeQueue.shouldQueue(channel)) {
-    if (typeof body === 'function') body = body(0);
-    return await sendMessageDirect(channel, body);
-  } else return await slowmodeQueue.enqueue(channel, body);
-}
+/** @type {(channelId: string, body: any) => Promise<any>} */
+let sendMessage = slowmodeQueue.sendOrEnqueue.bind(slowmodeQueue);
 
 /**
  * Edit a message
@@ -479,6 +485,10 @@ class PossiblySemaphore {
     this.executing = 0;
     /** @type {Deferred[]} */
     this.queue = [];
+  }
+
+  canAcquire() {
+    return this.executing < this.maxCount;
   }
 
   /**
@@ -677,14 +687,15 @@ async function runCommand(args, event) {
         embed.color = color;
         if (sent) await editMessage(event.channel_id, messageId, { embed });
       };
-      updateLoadState('waiting for semaphore', 0xffff00);
+      if (wolframAlphaQueryLock.canAcquire()) updateLoadState('Running...', 0x2decfa);
+      else updateLoadState('waiting for semaphore', 0xffff00);
       let promise = wolframAlphaQueryLock.execute(async () => {
         updateLoadState('Running...', 0x2decfa);
         return await inject.wolframAlphaQuery(query);
       });
       sent = await sendMessage(event.channel_id, { embed });
       let messageId = sent.body.id;
-      
+
       let response = await promise;
       log('wolframalpha response:', response);
 
