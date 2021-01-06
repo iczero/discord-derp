@@ -56,6 +56,7 @@ const resolvedModules = resolveModules({
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
   guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
   guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
+  permissions: m => m.default && typeof m.default.getChannelPermissions === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
@@ -66,12 +67,13 @@ const resolvedModules = resolveModules({
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function'
 });
 
-const { Endpoints, ActionTypes, ComponentActions } = resolvedModules.data;
+const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
 const dispatcher = resolvedModules.dispatcher.default;
 const superagent = resolvedModules.superagent;
 const ComponentDispatch = resolvedModules.componentDispatch.ComponentDispatch;
 const api = resolvedModules.api.default;
 const GatewaySocket = resolvedModules.gateway.default;
+const permissionsRegistry = resolvedModules.permissions.default;
 const EventEmitter = resolvedModules.events.EventEmitter
 const React = resolvedModules.react;
 const ReactDOM = resolvedModules.reactDOM;
@@ -237,6 +239,19 @@ class Deferred {
   }
 }
 
+/**
+ * Get effective slowmode cooldown for channel in ms
+ * @param {string} channelId
+ * @return {number} Slowmode cooldown in ms
+ */
+function getEffectiveSlowmodeCooldown(channelId) {
+  let channel = channelRegistry.getChannel(channelId);
+  if (channel.rateLimitPerUser === 0) return 0;
+  else if (permissionsRegistry.can(Permissions.MANAGE_CHANNELS, channel)) return 0;
+  else if (permissionsRegistry.can(Permissions.MANAGE_MESSAGES, channel)) return 0;
+  else return channel.rateLimitPerUser * 1000;
+}
+
 /** Slowmode handler */
 class SlowmodeQueue {
   constructor() {
@@ -247,9 +262,9 @@ class SlowmodeQueue {
   }
 
   restartCooldown(channelId) {
-    let channel = channelRegistry.getChannel(channelId);
-    if (!channel.rateLimitPerUser) return;
-    let cooldownEnd = channel.rateLimitPerUser * 1000 + Date.now();
+    let ratelimit = getEffectiveSlowmodeCooldown(channelId);
+    if (!ratelimit) return;
+    let cooldownEnd = ratelimit + Date.now();
     let current = this.slowmodeTimers.get(channelId);
     if (!current || cooldownEnd > current) this.slowmodeTimers.set(channelId, cooldownEnd);
   }
@@ -281,7 +296,7 @@ class SlowmodeQueue {
    */
   async sendOrEnqueue(channelId, body) {
     let shouldQueue = this.shouldQueue(channelId);
-    if (!shouldQueue && channelRegistry.getChannel(channelId).rateLimitPerUser) {
+    if (!shouldQueue && getEffectiveSlowmodeCooldown(channelId)) {
       // if bypassing queue on slowmoded channel, ensure next message will be queued
       this.restartCooldown(channelId);
     }
@@ -348,7 +363,7 @@ class SlowmodeQueue {
     top.deferred.resolve(result);
 
     if (!queue.length) this.channelQueues.delete(channelId);
-    let ratelimit = channelRegistry.getChannel(channelId).rateLimitPerUser * 1000;
+    let ratelimit = getEffectiveSlowmodeCooldown(channelId);
     if (queue.length) setTimeout(() => this.drain(channelId), ratelimit);
   }
 
