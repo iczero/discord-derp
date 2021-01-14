@@ -11,6 +11,7 @@ COPY texlive.profile .
 RUN ./install-tl -profile texlive.profile
 RUN rm -rf /root/texlive-install
 
+RUN tlmgr update --self
 RUN tlmgr install dvipng xkeyval standalone preview varwidth
 RUN tlmgr path add
 

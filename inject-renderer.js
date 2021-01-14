@@ -56,6 +56,7 @@ const resolvedModules = resolveModules({
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
   guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
   guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
+  emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStore',
   permissions: m => m.default && typeof m.default.getChannelPermissions === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
@@ -86,6 +87,8 @@ const messageRegistry = resolvedModules.messages.default;
 const messageActions = resolvedModules.messageActions.default;
 const messageQueue = resolvedModules.messageQueue.default;
 const MessageDataType = resolvedModules.messageQueue.MessageDataType;
+const emojiRegistry = resolvedModules.emojis.default;
+const EmojiDisambiguations = resolvedModules.emojis.EmojiDisambiguations;
 
 // late load modules
 let messageHooks = null;
@@ -817,7 +820,7 @@ async function runCommand(args, event) {
             }
             // replace existing warning
             // we don't have to worry about length as if the pod limit warning already
-            // exists it is for 25, which is >= the length of what it needs to be now
+            // exists, then it is for 25, which is >= the length of what it needs to be now
             podLimitWarning = embed.fields.length;
             break;
           } else {
