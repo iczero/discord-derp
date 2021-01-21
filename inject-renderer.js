@@ -590,373 +590,378 @@ const WOLFRAMALPHA_LOADING_MESSAGES = [
 // or discord will commit suicide by SIGILL
 let wolframAlphaQueryLock = new PossiblySemaphore(1);
 
-async function runCommand(args, event) {
-  log('command:', args[0], event);
-  switch (args[0].toLowerCase()) {
-    case 'override': {
-      if (event.author.id !== userRegistry.getCurrentUser().id) return;
-      runCommand(args.slice(1), event);
-      break;
+let chatCommands = new Map();
+
+function registerCommand(name, fn) {
+  if (typeof fn === 'string') {
+    let target = chatCommands.get(fn.toLowerCase());
+    if (!target) throw new Error('alias references nonexistent command ' + name);
+    chatCommands.set(name.toLowerCase(), target);
+  } else if (typeof fn === 'function') {
+    chatCommands.set(name.toLowerCase(), fn);
+  } else throw new Error('wrong argument type');
+}
+
+registerCommand('override', async (args, event) => {
+  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  runCommand(args.slice(1), event);
+});
+registerCommand('guildcommands', async (args, event) => {
+  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  let subcommand = args[1].toLowerCase();
+  if (subcommand === 'enable') {
+    ALLOWED_GUILDS.add(event.guild_id);
+    await sendMessage(event.channel_id, { content: 'commands enabled for guild' });
+  } else if (subcommand === 'disable') {
+    ALLOWED_GUILDS.delete(event.guild_id);
+    await sendMessage(event.channel_id, { content: 'commands disabled for guild' });
+  } else await sendMessage(event.channel_id, { content: '?' });
+});
+
+registerCommand('restart', async (args, event) => {
+  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  window.DiscordNative.app.relaunch();
+});
+registerCommand('ping', async (args, event) => {
+  let id = generateNonce();
+  let gatewayDeferred = new Deferred();
+  pingInfo.set(id, gatewayDeferred.resolve);
+  let startDate = new Date();
+  let sendTs;
+  let apiReturnTs;
+  let [sent, gatewayReturnTs] = await Promise.all([
+    sendMessage(event.channel_id, {
+      content: `(ping ${id})`,
+      onSend: () => sendTs = Date.now()
+    }).then(result => {
+      apiReturnTs = Date.now();
+      return result;
+    }),
+    gatewayDeferred.promise
+  ]);
+  let endTs = Date.now();
+  let startTs = +startDate;
+  let serverTs = +new Date(sent.body.timestamp);
+  pingInfo.delete(id);
+  let out = [
+    `(ping ${id})`,
+    `**Total latency** (including queues): ${endTs - startTs} ms`,
+    `**API timings**: rtt ${apiReturnTs - sendTs} ms, send ${serverTs - sendTs} ms, return ${apiReturnTs - serverTs} ms`,
+    `**Gateway timings**: rtt ${gatewayReturnTs - sendTs} ms, return ${gatewayReturnTs - serverTs} ms`,
+  ];
+  await editMessage(event.channel_id, sent.body.id, { content: out.join('\n') });
+});
+registerCommand('annoy', async (args, event) => {
+  let mentions = event.mentions;
+  if (!mentions.length) return;
+  let target = mentions[0].id;
+  if (Math.random() < 0.05) target = event.author.id;
+  let ntt = `<@${target}>`;
+  if (ntt.length > 25) return;
+  ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
+  ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
+  await sendMessage(event.channel_id, { content: ntt });
+});
+registerCommand('rms', async (args, event) => {
+  // ABSOLUTELY PROPRIETARY
+  await sendMessage(event.channel_id, { content: 'https://i.redd.it/7ozal346p6kz.png' });
+});
+registerCommand('proprietary', 'rms');
+registerCommand('getavatar', async (args, event) => {
+  let mentions = event.mentions;
+  if (!mentions.length) return;
+  let target = mentions[0].id;
+  let user = userRegistry.getUser(target);
+  let url = new URL(user.getAvatarURL());
+  url.searchParams.set('size', '512');
+  await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
+});
+registerCommand('wa', async (args, event) => {
+  let query = args.slice(1).join(' ').replace(/\n/g, ' ');
+  let user = userRegistry.getUser(event.author.id);
+  let avatarURL = user.getAvatarURL();
+  let username = user.username;
+  let displayedQuery = query;
+  if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
+  let sent = null;
+  let queryUrl = new URL('https://www.wolframalpha.com/input');
+  queryUrl.searchParams.set('i', query);
+  let embed = {
+    author: {
+      name: 'WolframAlpha: ' + displayedQuery,
+      url: queryUrl.href,
+      icon_url: 'https://hellomouse.net/static/wolframalpha.png'
+    },
+    title: '[iczero cannot write code]',
+    description: '[insert funny placeholder text here]',
+    timestamp: (new Date()).toISOString(),
+    footer: {
+      icon_url: avatarURL,
+      text: username
+    },
+    color: 0x000000
+  };
+  let updateLoadState = async (text, color) => {
+    embed.title = text;
+    embed.description = randomArrayElement(WOLFRAMALPHA_LOADING_MESSAGES);
+    embed.timestamp = (new Date()).toISOString();
+    embed.color = color;
+    if (sent) await editMessage(event.channel_id, messageId, { embed });
+  };
+  if (wolframAlphaQueryLock.canAcquire()) updateLoadState('Running...', 0x2decfa);
+  else updateLoadState('waiting for semaphore', 0xffff00);
+  let promise = wolframAlphaQueryLock.execute(async () => {
+    updateLoadState('Running...', 0x2decfa);
+    return await inject.wolframAlphaQuery(query);
+  });
+  sent = await sendMessage(event.channel_id, { embed });
+  let messageId = sent.body.id;
+
+  let response = await promise;
+  log('wolframalpha response:', response);
+
+  let baseMessageLength = embed.author.name.length + username.length;
+  process: {
+    embed.title = null;
+    if (response.failed) {
+      embed.color = 0xff0000;
+      embed.description = '**No results**';
+      break process;
     }
-    case 'guildcommands': {
-      if (event.author.id !== userRegistry.getCurrentUser().id) return;
-      let subcommand = args[1].toLowerCase();
-      if (subcommand === 'enable') {
-        ALLOWED_GUILDS.add(event.guild_id);
-        await sendMessage(event.channel_id, { content: 'commands enabled for guild' });
-      } else if (subcommand === 'disable') {
-        ALLOWED_GUILDS.delete(event.guild_id);
-        await sendMessage(event.channel_id, { content: 'commands disabled for guild' });
-      } else await sendMessage(event.channel_id, { content: '?' });
-      break;
+
+    embed.color = 0x00ff00;
+    let description = [];
+    let maybeImage = null;
+
+    if (response.timedOut.length) {
+      description.push('**Warning**: The following queries timed out: ' + response.timedOut.join(', '));
     }
-    case 'restart': {
-      if (event.author.id !== userRegistry.getCurrentUser().id) return;
-      window.DiscordNative.app.relaunch();
-      break;
+    for (let { text } of response.warnings) {
+      description.push('**Warning**: ' + text);
     }
-    case 'ping': {
-      let id = generateNonce();
-      let gatewayDeferred = new Deferred();
-      pingInfo.set(id, gatewayDeferred.resolve);
-      let startDate = new Date();
-      let sendTs;
-      let apiReturnTs;
-      let [sent, gatewayReturnTs] = await Promise.all([
-        sendMessage(event.channel_id, {
-          content: `(ping ${id})`,
-          onSend: () => sendTs = Date.now()
-        }).then(result => {
-          apiReturnTs = Date.now();
-          return result;
-        }),
-        gatewayDeferred.promise
-      ]);
-      let endTs = Date.now();
-      let startTs = +startDate;
-      let serverTs = +new Date(sent.body.timestamp);
-      pingInfo.delete(id);
-      let out = [
-        `(ping ${id})`,
-        `**Total latency** (including queues): ${endTs - startTs} ms`,
-        `**API timings**: rtt ${apiReturnTs - sendTs} ms, send ${serverTs - sendTs} ms, return ${apiReturnTs - serverTs} ms`,
-        `**Gateway timings**: rtt ${gatewayReturnTs - sendTs} ms, return ${gatewayReturnTs - serverTs} ms`,
-      ];
-      await editMessage(event.channel_id, sent.body.id, { content: out.join('\n') });
-      break;
+    if (response.correctedInput && response.originalInput !== response.correctedInput) {
+      description.push('**Using input**: ' + response.correctedInput);
     }
-    case 'annoy': {
-      let mentions = event.mentions;
-      if (!mentions.length) break;
-      let target = mentions[0].id;
-      if (Math.random() < 0.05) target = event.author.id;
-      let ntt = `<@${target}>`;
-      if (ntt.length > 25) break;
-      ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
-      ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
-      await sendMessage(event.channel_id, { content: ntt });
-      break;
+    for (let { string } of response.assumptions) {
+      description.push(string);
     }
-    case 'rms':
-    case 'proprietary': {
-      // ABSOLUTELY PROPRIETARY
-      await sendMessage(event.channel_id, { content: 'https://i.redd.it/7ozal346p6kz.png' });
-      break;
+    for (let topic of response.futureTopic) {
+      description.push(`**${topic.topic}**: ${topic.msg}`);
     }
-    case 'getavatar': {
-      let mentions = event.mentions;
-      if (!mentions.length) break;
-      let target = mentions[0].id;
-      let user = userRegistry.getUser(target);
-      let url = new URL(user.getAvatarURL());
-      url.searchParams.set('size', '512');
-      await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
-      break;
+    if (response.erroredPods.length) {
+      description.push('**Warning**: The following pods errored: ' +
+        response.erroredPods.map(pod => pod.id).join(', '));
     }
-    case 'wa': {
-      let query = args.slice(1).join(' ').replace(/\n/g, ' ');
-      let user = userRegistry.getUser(event.author.id);
-      let avatarURL = user.getAvatarURL();
-      let username = user.username;
-      let displayedQuery = query;
-      if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
-      let sent = null;
-      let queryUrl = new URL('https://www.wolframalpha.com/input');
-      queryUrl.searchParams.set('i', query);
-      let embed = {
-        author: {
-          name: 'WolframAlpha: ' + displayedQuery,
-          url: queryUrl.href,
-          icon_url: 'https://hellomouse.net/static/wolframalpha.png'
-        },
-        title: '[iczero cannot write code]',
-        description: '[insert funny placeholder text here]',
-        timestamp: (new Date()).toISOString(),
-        footer: {
-          icon_url: avatarURL,
-          text: username
-        },
-        color: 0x000000
-      };
-      let updateLoadState = async (text, color) => {
-        embed.title = text;
-        embed.description = randomArrayElement(WOLFRAMALPHA_LOADING_MESSAGES);
-        embed.timestamp = (new Date()).toISOString();
-        embed.color = color;
-        if (sent) await editMessage(event.channel_id, messageId, { embed });
-      };
-      if (wolframAlphaQueryLock.canAcquire()) updateLoadState('Running...', 0x2decfa);
-      else updateLoadState('waiting for semaphore', 0xffff00);
-      let promise = wolframAlphaQueryLock.execute(async () => {
-        updateLoadState('Running...', 0x2decfa);
-        return await inject.wolframAlphaQuery(query);
+
+    if (!response.pods.size) {
+      embed.color = 0xff0000;
+      description.unshift('**Warning**: No pods in response (query timed out?)');
+      embed.description = truncateLinesArray(description, EMBED_MAX_LENGTH - baseMessageLength);
+      break process;
+    }
+
+    let fields = [];
+    podLoop: for (let pod of response.pods.values()) {
+      let value = [];
+      let stepByStepPod = response.stepByStep.get(pod.position);
+      if (pod.error) value.push('**Warning**: this pod errored');
+      if (pod.subpods) {
+        for (let subpod of pod.subpods) {
+          if (subpod.plaintext) {
+            // i shit you not this is literally in their code
+            // maybe lift this constant somewhere
+            const REQUIRES_INTERACTIVITY = '(requires interactivity)';
+            if (subpod.plaintext === REQUIRES_INTERACTIVITY) {
+              if (!stepByStepPod) continue podLoop;
+            } else value.push(subpod.plaintext);
+          } else if (subpod.img) {
+            value.push('**Image**: ' + subpod.img.src);
+            if (!maybeImage) maybeImage = subpod.img.src;
+          } else value.push('(no representation available)');
+        }
+      }
+      if (pod.async) value.push('**Async pod data**: ' + pod.async);
+      if (stepByStepPod) {
+        value.push('**Step by step**: ' + stepByStepPod.title);
+        for (let subpod of stepByStepPod.subpods) {
+          if (subpod.plaintext) value.push(subpod.plaintext);
+          else if (subpod.img) value.push('**Image**: ' + subpod.img.src);
+          else value.push('(no representation available)');
+        }
+      }
+      if (!value.length) value.push('No data (possible pod error?)');
+      fields.push({
+        name: pod.title.slice(0, EMBED_FIELD_NAME_MAX_LENGTH),
+        value: truncateLinesArray(value, EMBED_FIELD_VALUE_MAX_LENGTH)
       });
-      sent = await sendMessage(event.channel_id, { embed });
-      let messageId = sent.body.id;
-
-      let response = await promise;
-      log('wolframalpha response:', response);
-
-      let baseMessageLength = embed.author.name.length + username.length;
-      process: {
-        embed.title = null;
-        if (response.failed) {
-          embed.color = 0xff0000;
-          embed.description = '**No results**';
-          break process;
-        }
-
-        embed.color = 0x00ff00;
-        let description = [];
-        let maybeImage = null;
-
-        if (response.timedOut.length) {
-          description.push('**Warning**: The following queries timed out: ' + response.timedOut.join(', '));
-        }
-        for (let { text } of response.warnings) {
-          description.push('**Warning**: ' + text);
-        }
-        if (response.correctedInput && response.originalInput !== response.correctedInput) {
-          description.push('**Using input**: ' + response.correctedInput);
-        }
-        for (let { string } of response.assumptions) {
-          description.push(string);
-        }
-        for (let topic of response.futureTopic) {
-          description.push(`**${topic.topic}**: ${topic.msg}`);
-        }
-        if (response.erroredPods.length) {
-          description.push('**Warning**: The following pods errored: ' +
-            response.erroredPods.map(pod => pod.id).join(', '));
-        }
-
-        if (!response.pods.size) {
-          embed.color = 0xff0000;
-          description.unshift('**Warning**: No pods in response (query timed out?)');
-          embed.description = truncateLinesArray(description, EMBED_MAX_LENGTH - baseMessageLength);
-          break process;
-        }
-
-        let fields = [];
-        podLoop: for (let pod of response.pods.values()) {
-          let value = [];
-          let stepByStepPod = response.stepByStep.get(pod.position);
-          if (pod.error) value.push('**Warning**: this pod errored');
-          if (pod.subpods) {
-            for (let subpod of pod.subpods) {
-              if (subpod.plaintext) {
-                // i shit you not this is literally in their code
-                // maybe lift this constant somewhere
-                const REQUIRES_INTERACTIVITY = '(requires interactivity)';
-                if (subpod.plaintext === REQUIRES_INTERACTIVITY) {
-                  if (!stepByStepPod) continue podLoop;
-                } else value.push(subpod.plaintext);
-              } else if (subpod.img) {
-                value.push('**Image**: ' + subpod.img.src);
-                if (!maybeImage) maybeImage = subpod.img.src;
-              } else value.push('(no representation available)');
-            }
-          }
-          if (pod.async) value.push('**Async pod data**: ' + pod.async);
-          if (stepByStepPod) {
-            value.push('**Step by step**: ' + stepByStepPod.title);
-            for (let subpod of stepByStepPod.subpods) {
-              if (subpod.plaintext) value.push(subpod.plaintext);
-              else if (subpod.img) value.push('**Image**: ' + subpod.img.src);
-              else value.push('(no representation available)');
-            }
-          }
-          if (!value.length) value.push('No data (possible pod error?)');
-          fields.push({
-            name: pod.title.slice(0, EMBED_FIELD_NAME_MAX_LENGTH),
-            value: truncateLinesArray(value, EMBED_FIELD_VALUE_MAX_LENGTH)
-          });
-        }
-        let makePodLimitWarning = n => `**Warning**: only the first ${n} pods are shown`;
-        let podLimitWarning = null;
-        if (fields.length > EMBED_MAX_FIELDS) {
-          fields = fields.slice(0, EMBED_MAX_FIELDS);
-          podLimitWarning = EMBED_MAX_FIELDS;
-        }
-
-        const DESCRIPTION_MAX_LENGTH = 1000;
-        let descriptionMaxLength = DESCRIPTION_MAX_LENGTH;
-        embed.description = truncateLinesArray(description, descriptionMaxLength);
-        let embedLength = baseMessageLength + Math.min(embed.description.length + (podLimitWarning
-          ? makePodLimitWarning(podLimitWarning).length
-          : 0), descriptionMaxLength);
-        embed.fields = []
-        for (let field of fields) {
-          let fieldLength = field.name.length + field.value.length;
-          if (embedLength + fieldLength > EMBED_MAX_LENGTH) {
-            let exceededLength = (embedLength + makePodLimitWarning(embed.fields.length).length) - EMBED_MAX_LENGTH;
-            if (!podLimitWarning && exceededLength > 0) {
-              // try to fit warning in
-              let lastField;
-              do {
-                lastField = embed.fields.pop();
-                embedLength -= lastField.name.length + lastField.value.length;
-              } while (embedLength + fieldLength > EMBED_MAX_LENGTH);
-            }
-            // replace existing warning
-            // we don't have to worry about length as if the pod limit warning already
-            // exists, then it is for 25, which is >= the length of what it needs to be now
-            podLimitWarning = embed.fields.length;
-            break;
-          } else {
-            embedLength += fieldLength;
-            embed.fields.push(field);
-          }
-        }
-        if (podLimitWarning) description.unshift(makePodLimitWarning(podLimitWarning));
-        embed.description = truncateLinesArray(description, descriptionMaxLength);
-        if (maybeImage) {
-          embed.image = { url: maybeImage };
-        }
-        embed.timestamp = (new Date()).toISOString();
-      }
-
-      await editMessage(event.channel_id, messageId, { embed });
-      break;
     }
-    case 'cross': {
-      // but why am i doing this
-      // todo: lift functions or something idk
-      /**
-       * Parse genotype
-       * @param {string} s
-       * @return {{ error: string} | { error: null, split: string[], alleles: string[], gametes: string[] }}
-       */
-      function parseGenotype(s) {
-        if (!s.length) return { error: 'empty genotype' };
-        if (s.length % 2) return { error: 'genotype length must be a multiple of 2' };
-        /** @type {string} */
-        let split = [];
-        for (let i = 0; i < s.length; i += 2) split.push(s.slice(i, i + 2));
-        /** @type {string} */
-        let alleles = [];
-        for (let pair of split) {
-          if (pair[0].toLowerCase() !== pair[1].toLowerCase()) {
-            return { error: `pair ${pair} does not match` };
-          }
-          alleles.push(pair[0].toLowerCase());
-        }
-        // abusing binary to generate permutations
-        let gametes = new Set();
-        for (let select = 0; select < 2 ** split.length; select++) {
-          let gamete = [];
-          for (let i = 0; i < split.length; i++) {
-            gamete.push(split[i][(select >> i) & 1]);
-          }
-          gametes.add(gamete.join(''));
-        }
-        return { error: null, split, alleles, gametes: [...gametes] };
-      }
-      /**
-       * Normalize allele pair (aA -> Aa)
-       * @param {string[]} s
-       */
-      function normalizePair(s) {
-        if (s[0] === s[0].toUpperCase()) return [s[0], s[1]];
-        else return [s[1], s[0]];
-      }
-      if (args.length < 3) {
-        await sendMessage(event.channel_id, { content: 'must cross 2 things' });
-        return;
-      }
-      let genotype1 = parseGenotype(args[1]);
-      if (genotype1.error) {
-        await sendMessage(event.channel_id, { content: 'genotype 1 error: ' + genotype1.error });
-        return;
-      }
-      let genotype2 = parseGenotype(args[2]);
-      if (genotype2.error) {
-        await sendMessage(event.channel_id, { content: 'genotype 2 error: ' + genotype2.error });
-        return;
-      }
-      if (Math.max(genotype1.alleles.length, genotype2.alleles.length) > 3) {
-        await sendMessage(event.channel_id, { content: 'too many alleles (blame message limit)' });
-        return;
-      }
-      if (!arrayEquals(genotype1.alleles, genotype2.alleles)) {
-        await sendMessage(event.channel_id, { content: 'genotype alleles do not match' });
-        return;
-      }
-      let table = new Array(genotype1.gametes.length).fill(null);
-      for (let i = 0; i < table.length; i++) {
-        table[i] = new Array(genotype2.gametes.length).fill(null);
-      }
-      /** @type {Map<string, number>} */
-      let genotypeFrequencies = new Map();
-      let total = genotype1.gametes.length * genotype2.gametes.length;
-      for (let row = 0; row < table.length; row++) {
-        for (let col = 0; col < table[row].length; col++) {
-          let genotype = [];
-          for (let i = 0; i < genotype1.alleles.length; i++) {
-            genotype.push(normalizePair([genotype1.gametes[row][i], genotype2.gametes[col][i]]).join(''));
-          }
-          let combined = genotype.join('');
-          table[row][col] = combined;
-          let freq = genotypeFrequencies.get(combined);
-          if (!freq) genotypeFrequencies.set(combined, 1);
-          else genotypeFrequencies.set(combined, freq + 1);
-        }
-      }
-      log('polyhybrid:', table, genotypeFrequencies);
-      let prettyTable = [];
-      let g1 = genotype1.gametes;
-      let g2 = genotype2.gametes;
-      let al = genotype1.alleles.length;
-      // column header
-      prettyTable.push(`${' '.repeat(al)} | ${g2.join(' '.repeat(al + 1))}`);
-      // separator
-      prettyTable.push(`${'-'.repeat(al)}-+-${'-'.repeat((al * 2 + 1) * genotype1.gametes.length)}`);
-      // rows
-      for (let [i, row] of table.entries()) {
-        prettyTable.push(`${g1[i]} | ${row.join(' ')}`);
-      }
-      let freqInfo = [...genotypeFrequencies]
-        .sort(([, v1], [, v2]) => v2 - v1)
-        .map(([key, value]) => `${key}: ${value}/${total} (${(value / total * 100).toFixed(2)}%)`)
-        .join('\n');
-      await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
-      break;
+    let makePodLimitWarning = n => `**Warning**: only the first ${n} pods are shown`;
+    let podLimitWarning = null;
+    if (fields.length > EMBED_MAX_FIELDS) {
+      fields = fields.slice(0, EMBED_MAX_FIELDS);
+      podLimitWarning = EMBED_MAX_FIELDS;
     }
-    case 'math':
-    case 'tex': {
-      let input = args.slice(1).join(' ');
-      let codeblockMatch = input.match(/`{3}(?:la)?tex\n(.+?)`{3}/s);
-      if (codeblockMatch) input = codeblockMatch[1];
-      if (args[0] === 'math') input = `\\[\n${input}\n\\]`;
-      let result = await inject.makeLatexImage(input);
-      let blob = new Blob([result.output]);
-      if (!result.error) {
-        await sendMessage(event.channel_id, { file: blob, filename: 'latex.png' });
+
+    const DESCRIPTION_MAX_LENGTH = 1000;
+    let descriptionMaxLength = DESCRIPTION_MAX_LENGTH;
+    embed.description = truncateLinesArray(description, descriptionMaxLength);
+    let embedLength = baseMessageLength + Math.min(embed.description.length + (podLimitWarning
+      ? makePodLimitWarning(podLimitWarning).length
+      : 0), descriptionMaxLength);
+    embed.fields = []
+    for (let field of fields) {
+      let fieldLength = field.name.length + field.value.length;
+      if (embedLength + fieldLength > EMBED_MAX_LENGTH) {
+        let exceededLength = (embedLength + makePodLimitWarning(embed.fields.length).length) - EMBED_MAX_LENGTH;
+        if (!podLimitWarning && exceededLength > 0) {
+          // try to fit warning in
+          let lastField;
+          do {
+            lastField = embed.fields.pop();
+            embedLength -= lastField.name.length + lastField.value.length;
+          } while (embedLength + fieldLength > EMBED_MAX_LENGTH);
+        }
+        // replace existing warning
+        // we don't have to worry about length as if the pod limit warning already
+        // exists, then it is for 25, which is >= the length of what it needs to be now
+        podLimitWarning = embed.fields.length;
+        break;
       } else {
-        await sendMessage(event.channel_id, { content: 'An error occurred', file: blob, filename: 'error.txt' });
+        embedLength += fieldLength;
+        embed.fields.push(field);
       }
+    }
+    if (podLimitWarning) description.unshift(makePodLimitWarning(podLimitWarning));
+    embed.description = truncateLinesArray(description, descriptionMaxLength);
+    if (maybeImage) {
+      embed.image = { url: maybeImage };
+    }
+    embed.timestamp = (new Date()).toISOString();
+  }
+
+  await editMessage(event.channel_id, messageId, { embed });
+});
+registerCommand('cross', async (args, event) => {
+  // but why am i doing this
+  // todo: lift functions or something idk
+  /**
+   * Parse genotype
+   * @param {string} s
+   * @return {{ error: string} | { error: null, split: string[], alleles: string[], gametes: string[] }}
+   */
+  function parseGenotype(s) {
+    if (!s.length) return { error: 'empty genotype' };
+    if (s.length % 2) return { error: 'genotype length must be a multiple of 2' };
+    /** @type {string} */
+    let split = [];
+    for (let i = 0; i < s.length; i += 2) split.push(s.slice(i, i + 2));
+    /** @type {string} */
+    let alleles = [];
+    for (let pair of split) {
+      if (pair[0].toLowerCase() !== pair[1].toLowerCase()) {
+        return { error: `pair ${pair} does not match` };
+      }
+      alleles.push(pair[0].toLowerCase());
+    }
+    // abusing binary to generate permutations
+    let gametes = new Set();
+    for (let select = 0; select < 2 ** split.length; select++) {
+      let gamete = [];
+      for (let i = 0; i < split.length; i++) {
+        gamete.push(split[i][(select >> i) & 1]);
+      }
+      gametes.add(gamete.join(''));
+    }
+    return { error: null, split, alleles, gametes: [...gametes] };
+  }
+  /**
+   * Normalize allele pair (aA -> Aa)
+   * @param {string[]} s
+   */
+  function normalizePair(s) {
+    if (s[0] === s[0].toUpperCase()) return [s[0], s[1]];
+    else return [s[1], s[0]];
+  }
+  if (args.length < 3) {
+    await sendMessage(event.channel_id, { content: 'must cross 2 things' });
+    return;
+  }
+  let genotype1 = parseGenotype(args[1]);
+  if (genotype1.error) {
+    await sendMessage(event.channel_id, { content: 'genotype 1 error: ' + genotype1.error });
+    return;
+  }
+  let genotype2 = parseGenotype(args[2]);
+  if (genotype2.error) {
+    await sendMessage(event.channel_id, { content: 'genotype 2 error: ' + genotype2.error });
+    return;
+  }
+  if (Math.max(genotype1.alleles.length, genotype2.alleles.length) > 3) {
+    await sendMessage(event.channel_id, { content: 'too many alleles (blame message limit)' });
+    return;
+  }
+  if (!arrayEquals(genotype1.alleles, genotype2.alleles)) {
+    await sendMessage(event.channel_id, { content: 'genotype alleles do not match' });
+    return;
+  }
+  let table = new Array(genotype1.gametes.length).fill(null);
+  for (let i = 0; i < table.length; i++) {
+    table[i] = new Array(genotype2.gametes.length).fill(null);
+  }
+  /** @type {Map<string, number>} */
+  let genotypeFrequencies = new Map();
+  let total = genotype1.gametes.length * genotype2.gametes.length;
+  for (let row = 0; row < table.length; row++) {
+    for (let col = 0; col < table[row].length; col++) {
+      let genotype = [];
+      for (let i = 0; i < genotype1.alleles.length; i++) {
+        genotype.push(normalizePair([genotype1.gametes[row][i], genotype2.gametes[col][i]]).join(''));
+      }
+      let combined = genotype.join('');
+      table[row][col] = combined;
+      let freq = genotypeFrequencies.get(combined);
+      if (!freq) genotypeFrequencies.set(combined, 1);
+      else genotypeFrequencies.set(combined, freq + 1);
     }
   }
+  log('polyhybrid:', table, genotypeFrequencies);
+  let prettyTable = [];
+  let g1 = genotype1.gametes;
+  let g2 = genotype2.gametes;
+  let al = genotype1.alleles.length;
+  // column header
+  prettyTable.push(`${' '.repeat(al)} | ${g2.join(' '.repeat(al + 1))}`);
+  // separator
+  prettyTable.push(`${'-'.repeat(al)}-+-${'-'.repeat((al * 2 + 1) * genotype1.gametes.length)}`);
+  // rows
+  for (let [i, row] of table.entries()) {
+    prettyTable.push(`${g1[i]} | ${row.join(' ')}`);
+  }
+  let freqInfo = [...genotypeFrequencies]
+    .sort(([, v1], [, v2]) => v2 - v1)
+    .map(([key, value]) => `${key}: ${value}/${total} (${(value / total * 100).toFixed(2)}%)`)
+    .join('\n');
+  await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
+});
+registerCommand('tex', async (args, event) => {
+  let input = args.slice(1).join(' ');
+  let codeblockMatch = input.match(/`{3}(?:la)?tex\n(.+?)`{3}/s);
+  if (codeblockMatch) input = codeblockMatch[1];
+  if (args[0] === 'math') input = `\\[\n${input}\n\\]`;
+  let result = await inject.makeLatexImage(input);
+  let blob = new Blob([result.output]);
+  if (!result.error) {
+    await sendMessage(event.channel_id, { file: blob, filename: 'latex.png' });
+  } else {
+    await sendMessage(event.channel_id, { content: 'An error occurred', file: blob, filename: 'error.txt' });
+  }
+});
+registerCommand('math', 'tex');
+
+async function runCommand(args, event) {
+  log('command:', args[0], event);
+  let fn = chatCommands.get(args[0].toLowerCase());
+  if (fn) fn(args, event);
 }
 
 gatewayEvents.on('MESSAGE_CREATE', async event => {
