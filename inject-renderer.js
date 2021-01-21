@@ -130,7 +130,7 @@ function lateResolveModules() {
         replyHandler.createPendingReply({
           channel,
           message,
-          shouldMention: false,
+          shouldMention: event.shiftKey,
           showMentionToggle: true
         });
         // focus text area
