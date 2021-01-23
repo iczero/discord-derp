@@ -121,12 +121,19 @@ function lateResolveModules() {
     // message and channel are objects, not ids
     return React.useCallback(event => {
       if (event.altKey) {
-        event.preventDefault();
-        // original functionality (alt-click to set unread position)
-        setUnreadPosition(channel.id, message.id);
+        if (event.shiftKey) {
+          // edit message with alt-shift-click
+          if (message.author.id === userRegistry.getCurrentUser().id) {
+            messageActions.startEditMessage(channel.id, message.id, message.content);
+            event.preventDefault();
+          }
+        } else {
+          // original functionality (alt-click to set unread position)
+          setUnreadPosition(channel.id, message.id);
+          event.preventDefault();
+        }
       } else if (event.ctrlKey) {
-        event.preventDefault();
-        // reply on ctrl-click, disable mention by default
+        // reply on ctrl-click, disable mention by default unless shift key held
         replyHandler.createPendingReply({
           channel,
           message,
@@ -135,6 +142,7 @@ function lateResolveModules() {
         });
         // focus text area
         ComponentDispatch.dispatch(ComponentActions.TEXTAREA_FOCUS);
+        event.preventDefault();
       }
     }, [message.id, channel.id]);
   };
@@ -590,23 +598,23 @@ const WOLFRAMALPHA_LOADING_MESSAGES = [
 // or discord will commit suicide by SIGILL
 let wolframAlphaQueryLock = new PossiblySemaphore(1);
 
-let chatCommands = new Map();
+let externalCommands = new Map();
 
-function registerCommand(name, fn) {
+function registerExternalCommand(name, fn) {
   if (typeof fn === 'string') {
-    let target = chatCommands.get(fn.toLowerCase());
+    let target = externalCommands.get(fn.toLowerCase());
     if (!target) throw new Error('alias references nonexistent command ' + name);
-    chatCommands.set(name.toLowerCase(), target);
+    externalCommands.set(name.toLowerCase(), target);
   } else if (typeof fn === 'function') {
-    chatCommands.set(name.toLowerCase(), fn);
+    externalCommands.set(name.toLowerCase(), fn);
   } else throw new Error('wrong argument type');
 }
 
-registerCommand('override', async (args, event) => {
+registerExternalCommand('override', async (args, event) => {
   if (event.author.id !== userRegistry.getCurrentUser().id) return;
   runCommand(args.slice(1), event);
 });
-registerCommand('guildcommands', async (args, event) => {
+registerExternalCommand('guildcommands', async (args, event) => {
   if (event.author.id !== userRegistry.getCurrentUser().id) return;
   let subcommand = args[1].toLowerCase();
   if (subcommand === 'enable') {
@@ -618,11 +626,11 @@ registerCommand('guildcommands', async (args, event) => {
   } else await sendMessage(event.channel_id, { content: '?' });
 });
 
-registerCommand('restart', async (args, event) => {
+registerExternalCommand('restart', async (args, event) => {
   if (event.author.id !== userRegistry.getCurrentUser().id) return;
   window.DiscordNative.app.relaunch();
 });
-registerCommand('ping', async (args, event) => {
+registerExternalCommand('ping', async (args, event) => {
   let id = generateNonce();
   let gatewayDeferred = new Deferred();
   pingInfo.set(id, gatewayDeferred.resolve);
@@ -651,7 +659,7 @@ registerCommand('ping', async (args, event) => {
   ];
   await editMessage(event.channel_id, sent.body.id, { content: out.join('\n') });
 });
-registerCommand('annoy', async (args, event) => {
+registerExternalCommand('annoy', async (args, event) => {
   let mentions = event.mentions;
   if (!mentions.length) return;
   let target = mentions[0].id;
@@ -662,12 +670,12 @@ registerCommand('annoy', async (args, event) => {
   ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
   await sendMessage(event.channel_id, { content: ntt });
 });
-registerCommand('rms', async (args, event) => {
+registerExternalCommand('rms', async (args, event) => {
   // ABSOLUTELY PROPRIETARY
   await sendMessage(event.channel_id, { content: 'https://i.redd.it/7ozal346p6kz.png' });
 });
-registerCommand('proprietary', 'rms');
-registerCommand('getavatar', async (args, event) => {
+registerExternalCommand('proprietary', 'rms');
+registerExternalCommand('getavatar', async (args, event) => {
   let mentions = event.mentions;
   if (!mentions.length) return;
   let target = mentions[0].id;
@@ -676,7 +684,7 @@ registerCommand('getavatar', async (args, event) => {
   url.searchParams.set('size', '512');
   await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
 });
-registerCommand('wa', async (args, event) => {
+registerExternalCommand('wa', async (args, event) => {
   let query = args.slice(1).join(' ').replace(/\n/g, ' ');
   let user = userRegistry.getUser(event.author.id);
   let avatarURL = user.getAvatarURL();
@@ -841,7 +849,7 @@ registerCommand('wa', async (args, event) => {
 
   await editMessage(event.channel_id, messageId, { embed });
 });
-registerCommand('cross', async (args, event) => {
+registerExternalCommand('cross', async (args, event) => {
   // but why am i doing this
   // todo: lift functions or something idk
   /**
@@ -943,7 +951,7 @@ registerCommand('cross', async (args, event) => {
     .join('\n');
   await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
 });
-registerCommand('tex', async (args, event) => {
+registerExternalCommand('tex', async (args, event) => {
   let input = args.slice(1).join(' ');
   let codeblockMatch = input.match(/`{3}(?:la)?tex\n(.+?)`{3}/s);
   if (codeblockMatch) input = codeblockMatch[1];
@@ -956,11 +964,11 @@ registerCommand('tex', async (args, event) => {
     await sendMessage(event.channel_id, { content: 'An error occurred', file: blob, filename: 'error.txt' });
   }
 });
-registerCommand('math', 'tex');
+registerExternalCommand('math', 'tex');
 
 async function runCommand(args, event) {
   log('command:', args[0], event);
-  let fn = chatCommands.get(args[0].toLowerCase());
+  let fn = externalCommands.get(args[0].toLowerCase());
   if (fn) fn(args, event);
 }
 
