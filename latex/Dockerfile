@@ -12,7 +12,7 @@ RUN ./install-tl -profile texlive.profile
 RUN rm -rf /root/texlive-install
 
 RUN tlmgr update --self
-RUN tlmgr install dvipng xkeyval standalone preview varwidth
+RUN tlmgr install xkeyval simplekv standalone preview varwidth chemfig
 RUN tlmgr path add
 
 VOLUME /data

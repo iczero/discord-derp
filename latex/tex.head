@@ -1,11 +1,14 @@
 \documentclass[preview]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
 \usepackage{varwidth}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage[version=4]{mhchem}
 \usepackage{graphicx}
-\usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
+\usepackage{xcolor}
+\usepackage{chemfig}
 \begin{document}
+\color{white}
 \begin{varwidth}{250pt}
 
