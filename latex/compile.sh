@@ -3,4 +3,4 @@
 set -xe
 
 timeout 15s pdflatex --no-shell-escape -interaction=batchmode input.tex
-gs -dBATCH -dNOPAUSE -dSAFER -DTextAlphaBits=4 -dGraphicsOutputBits=4 -sDEVICE=pngalpha -r300 -o output.png input.pdf
+gs -dBATCH -dNOPAUSE -dSAFER -DTextAlphaBits=4 -dGraphicsOutputBits=4 -sDEVICE=pngalpha -r250 -o output.png input.pdf
