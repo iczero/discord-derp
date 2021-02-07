@@ -1,6 +1,7 @@
 \documentclass[preview]{standalone}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
+\usepackage{microtype}
 \usepackage{varwidth}
 \usepackage{amsmath}
 \usepackage{amsfonts}
@@ -10,5 +11,5 @@
 \usepackage{chemfig}
 \begin{document}
 \color{white}
-\begin{varwidth}{250pt}
+\begin{varwidth}{300pt}
 

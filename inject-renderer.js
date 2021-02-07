@@ -953,9 +953,35 @@ registerExternalCommand('cross', async (args, event) => {
 });
 registerExternalCommand('tex', async (args, event) => {
   let input = args.slice(1).join(' ');
-  let codeblockMatch = input.match(/`{3}(?:la)?tex\n(.+?)`{3}/s);
-  if (codeblockMatch) input = codeblockMatch[1];
-  if (args[0] === 'math') input = `\\[\n${input}\n\\]`;
+  // handle latex codeblocks
+  let codeblocks = [...input.matchAll(/`{3}(?:(\w+)\n)?(.+?)`{3}/gs)];
+  if (codeblocks.length) {
+    let inBlocks;
+    // look for specifically matched latex codeblocks
+    // match group 1 is language tag
+    let latexBlocks = codeblocks.filter(match => match[1] && ['latex', 'tex'].includes(match[1].toLowerCase()));
+    if (latexBlocks.length) {
+      // input has explicit latex blocks, use those
+      inBlocks = latexBlocks;
+    } else {
+      // no explicit latex blocks found
+      let untypedBlocks = codeblocks.filter(match => !match[1]);
+      if (untypedBlocks.length) {
+        // untyped blocks found, use those
+        inBlocks = untypedBlocks;
+      } else {
+        // no latex or untyped blocks? assume typo and use all blocks
+        inBlocks = codeblocks;
+      }
+    }
+    input = inBlocks.map(match => match[2]).join('');
+  } else if (input.startsWith('`') && input.endsWith('`')) {
+    // simple inline codeblock that spans the entire message
+    input = input.slice(1, -1);
+  }
+  // trim is necessary otherwise latex takes two newlines as \par
+  if (args[0] === 'math') input = `\\[\n${input.trim()}\n\\]`;
+  log('latex: final input is', input);
   let result = await inject.makeLatexImage(input);
   let blob = new Blob([result.output]);
   if (!result.error) {
