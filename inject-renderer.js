@@ -480,9 +480,9 @@ const TRUNCATED_TEXT = '**[truncated]**';
 function truncateLinesArray(lines, maxLength = 2000) {
   let truncatedArray = [];
   let length = 0;
-  for (let [i, entry] of lines.entries()) {
-    let entryLength = entry.length + 1;
-    if (length + entryLength > maxLength) {
+  for (let [i, line] of lines.entries()) {
+    let lineLength = line.length + 1;
+    if (length + lineLength > maxLength) {
       if (length + TRUNCATED_TEXT.length + 1 > maxLength) {
         truncatedArray[i - 1] = TRUNCATED_TEXT;
       } else {
@@ -490,7 +490,8 @@ function truncateLinesArray(lines, maxLength = 2000) {
       }
       break;
     }
-    truncatedArray.push(entry);
+    length += lineLength;
+    truncatedArray.push(line);
   }
   return truncatedArray.join('\n');
 }
@@ -987,7 +988,34 @@ registerExternalCommand('tex', async (args, event) => {
   if (!result.error) {
     await sendMessage(event.channel_id, { file: blob, filename: 'latex.png' });
   } else {
-    await sendMessage(event.channel_id, { content: 'An error occurred', file: blob, filename: 'error.txt' });
+    let errorMessage = new TextDecoder('utf-8').decode(result.output);
+    // why can't latex write error messages to different files ;-;
+    let errorLines = errorMessage.split('\n');
+    let filteredLines = [];
+    let foundErrorLine = false;
+    let includeNextLine = false;
+    for (let line of errorLines) {
+      // usually begins error messages
+      if (line.startsWith('! ')) {
+        foundErrorLine = true;
+        filteredLines.push(line);
+      } else if (foundErrorLine) {
+        if (includeNextLine) {
+          filteredLines.push(line);
+          includeNextLine = false;
+        } else if (line.startsWith('l.')) {
+          includeNextLine = true;
+          filteredLines.push(line);
+        } else if (!line.length) {
+          foundErrorLine = false;
+        } else {
+          filteredLines.push(line);
+        }
+      }
+    }
+    let shortError = '';
+    if (filteredLines.length) shortError = '\n```\n' + truncateLinesArray(filteredLines, 1950) + '\n```';
+    await sendMessage(event.channel_id, { content: 'An error occurred' + shortError, file: blob, filename: 'error.txt' });
   }
 });
 registerExternalCommand('math', 'tex');
