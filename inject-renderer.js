@@ -124,7 +124,7 @@ function lateResolveModules() {
         if (event.shiftKey) {
           // edit message with alt-shift-click
           if (message.author.id === userRegistry.getCurrentUser().id) {
-            messageActions.startEditMessage(channel.id, message.id, message.content);
+            messageActions.startEditMessage(channel.id, message.id, messageRegistry.getMessage(channel.id, message.id).content);
             event.preventDefault();
           }
         } else {
@@ -567,6 +567,95 @@ function randomArrayElement(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
+/**
+ * Holds message update handlers
+ * Keys are `${channelId}-${messageId}`
+ * @type {Map<string, MessageUpdateHandler>}
+ */
+let messageUpdateHandlers = new Map();
+
+class MessageUpdateHandler {
+  /**
+   * The constructor
+   * @param {string} channelId
+   * @param {string} messageId 
+   * @param {(event: any, handler: MessageUpdateHandler) => any} handler 
+   * @param {number?} timeout
+   */
+  constructor(channelId, messageId, handler, timeout = 60000) {
+    this.channelId = channelId;
+    this.messageId = messageId;
+    this.handler = handler;
+    this.timeout = timeout;
+    this._expireTime = Date.now() + timeout;
+  }
+
+  get key() {
+    return `${this.channelId}-${this.messageId}`;
+  }
+
+  resetTimeout() {
+    this._expireTime = Date.now() + this.timeout;
+  }
+
+  register() {
+    if (messageUpdateHandlers.has(this.key)) {
+      throw new Error('attempted to register duplicate message update handler on ' + this.key);
+    }
+    messageUpdateHandlers.set(this.key, this);
+  }
+
+  unregister() {
+    messageUpdateHandlers.delete(this.key);
+  }
+
+  execute(event) {
+    this.handler(event, this);
+  }
+}
+
+const MESSAGE_UPDATE_HANDLER_CLEANUP_INTERVAL = 5000; // clean up every 5 seconds
+let messageUpdateHandlersCleanup = setInterval(() => {
+  if (messageUpdateHandlers.size) return;
+  for (let [key, value] of messageUpdateHandlers.entries()) {
+    let time = Date.now();
+    if (value._expireTime < time) messageUpdateHandlers.delete(key);
+  }
+}, MESSAGE_UPDATE_HANDLER_CLEANUP_INTERVAL);
+
+gatewayEvents.on('MESSAGE_UPDATE', event => {
+  let key = `${event.channel_id}-${event.id}`;
+  let handler = messageUpdateHandlers.get(key);
+  if (handler) handler.execute(event);
+});
+
+/** @type {Map<string, Set<(event: any) => any>>} */
+/* TODO: this can and will leak memory
+let messageDeleteHandlers = new Map();
+function registerMessageDeleteHandler(channelId, messageId, fn) {
+  let key = `${channelId}-${messageId}`;
+  let handlers = messageDeleteHandlers.get(key);
+  if (handlers) handlers.add(fn);
+  else messageDeleteHandlers.set(key, new Set([fn]));
+}
+function unregisterMessageDeleteHandler(channelId, messageId, fn) {
+  let key = `${channelId}-${messageId}`;
+  let handlers = messageDeleteHandlers.get(key);
+  if (handlers) handlers.delete(fn);
+}
+*/
+gatewayEvents.on('MESSAGE_DELETE', event => {
+  let key = `${event.channel_id}-${event.id}`;
+  messageUpdateHandlers.delete(key);
+  /*
+  let deleteHandlers = messageDeleteHandlers.get(key);
+  if (deleteHandlers) {
+    for (let fn of deleteHandlers) fn(event);
+    messageDeleteHandlers.delete(key);
+  }
+  */
+});
+
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
@@ -952,8 +1041,8 @@ registerExternalCommand('cross', async (args, event) => {
     .join('\n');
   await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
 });
-registerExternalCommand('tex', async (args, event) => {
-  let input = args.slice(1).join(' ');
+
+async function renderLatex(input, mode) {
   // handle latex codeblocks
   let codeblocks = [...input.matchAll(/`{3}(?:(\w+)\n)?(.+?)`{3}/gs)];
   if (codeblocks.length) {
@@ -981,12 +1070,11 @@ registerExternalCommand('tex', async (args, event) => {
     input = input.slice(1, -1);
   }
   // trim is necessary otherwise latex takes two newlines as \par
-  if (args[0] === 'math') input = `\\[\n${input.trim()}\n\\]`;
-  log('latex: final input is', input);
+  if (mode === 'math') input = `\\[\n${input.trim()}\n\\]`;
   let result = await inject.makeLatexImage(input);
   let blob = new Blob([result.output]);
   if (!result.error) {
-    await sendMessage(event.channel_id, { file: blob, filename: 'latex.png' });
+    return { file: blob, filename: 'latex.png' };
   } else {
     let errorMessage = new TextDecoder('utf-8').decode(result.output);
     // why can't latex write error messages to different files ;-;
@@ -1015,8 +1103,29 @@ registerExternalCommand('tex', async (args, event) => {
     }
     let shortError = '';
     if (filteredLines.length) shortError = '\n```\n' + truncateLinesArray(filteredLines, 1950) + '\n```';
-    await sendMessage(event.channel_id, { content: 'An error occurred' + shortError, file: blob, filename: 'error.txt' });
+    return { content: 'An error occurred' + shortError, file: blob, filename: 'error.txt' };
   }
+}
+
+const LATEX_EDIT_TIMEOUT = 15 * 60 * 1000;
+registerExternalCommand('tex', async (args, event) => {
+  let input = args.slice(1).join(' ');
+  let result = await renderLatex(input, args[0]);
+  let replyMessage = await sendMessage(event.channel_id, result);
+  let initialReplyTime = Date.now();
+  let editHandler = new MessageUpdateHandler(event.channel_id, event.id, async (event, handler) => {
+    if (!event.content.startsWith(PREFIX)) {
+      handler.unregister();
+      return;
+    }
+    if (Date.now() < initialReplyTime + LATEX_EDIT_TIMEOUT) handler.resetTimeout();
+    await api.delete(Endpoints.MESSAGE(replyMessage.body.channel_id, replyMessage.body.id));
+    let args = splitCommandMessage(event.content);
+    let input = args.slice(1).join(' ');
+    let result = await renderLatex(input, args[0]);
+    replyMessage = await sendMessage(replyMessage.body.channel_id, result);
+  }, 60 * 1000);
+  editHandler.register();
 });
 registerExternalCommand('math', 'tex');
 
@@ -1026,16 +1135,26 @@ async function runCommand(args, event) {
   if (fn) fn(args, event);
 }
 
+/**
+ * Split message, assumes valid command with prefix
+ * @param {string} content
+ * @return {string[]}
+ */
+function splitCommandMessage(content) {
+  let messageSplit = content.split(' ');
+  let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
+  return args;
+}
+
 gatewayEvents.on('MESSAGE_CREATE', async event => {
   if (!enableCommands) return;
   let channel = channelRegistry.getChannel(event.channel_id);
   if (!channel) return;
-  let messageSplit = event.content.split(' ');
-  let args = [messageSplit[0].slice(PREFIX.length), ...messageSplit.slice(1)];
+  if (!event.content.startsWith(PREFIX)) return;
+  let args = splitCommandMessage(event.content);
   if (!ALLOWED_GUILDS.has(event.guild_id)) {
     if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
   }
-  if (!event.content.startsWith(PREFIX)) return;
   try {
     runCommand(args, event);
   } catch (err) {

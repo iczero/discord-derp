@@ -7,9 +7,10 @@
 \usepackage{amsfonts}
 \usepackage[version=4]{mhchem}
 \usepackage{graphicx}
+\usepackage{tikz}
 \usepackage{xcolor}
 \usepackage{chemfig}
 \begin{document}
 \color{white}
-\begin{varwidth}{300pt}
+\begin{varwidth}{500pt}
 
