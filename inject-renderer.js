@@ -1128,6 +1128,92 @@ registerExternalCommand('tex', async (args, event) => {
   editHandler.register();
 });
 registerExternalCommand('math', 'tex');
+registerExternalCommand('random', async (args, event) => {
+  let splitArgs = args.slice(1).map(a => a.toLowerCase());
+  let short = false;
+  let decimal = false;
+  let encoding = 'hex';
+  while (splitArgs.length) {
+    switch (splitArgs.pop()) {
+      case 'short': short = true; break;
+      case 'long': short = false; break;
+      case 'hex': decimal = false; encoding = 'hex'; break;
+      case 'base64': decimal = false; encoding = 'base64'; break;
+      case 'decimal': decimal = true; break;
+      default: break;
+    }
+  }
+
+  let reply = '';
+  if (!decimal) {
+    let length = 64;
+    if (short) length = 8;
+    reply = inject.random.read(length, encoding);
+  } else {
+    let rawState = inject.random.readRaw();
+    if (short) reply = rawState[0].toString();
+    else {
+      reply = rawState.slice(0, 8)
+        .reduce((acc, val, idx) => acc | (val << BigInt(idx * 64)), 0n)
+        .toString();
+    }
+  }
+  await sendMessage(event.channel_id, { content: reply });
+});
+registerExternalCommand('roll', async (args, event) => {
+  let dice = args.slice(1).map(m => {
+    let spec = m.split('d');
+    let count;
+    if (spec[0].length) count = +spec[0];
+    else count = 1;
+    let sides = +spec[1];
+    if (!Number.isFinite(count) || !Number.isFinite(sides)) return null;
+    count = Math.floor(count);
+    sides = Math.floor(sides);
+    if (count <= 0 || count > 100) return null;
+    if (sides <= 0 || sides > 1e9) return null;
+    return [count, sides];
+  }).filter(Boolean).slice(0, 25);
+  let output = [];
+  let outputLength = 0;
+  mainLoop: for (let [count, sides] of dice) {
+    let lineHeader = `**${count}d${sides}:** `;
+    if (outputLength + lineHeader.length >= MESSAGE_MAX_LENGTH) break;
+    let source = inject.random.floatMany(count);
+    let results = [];
+    let lineLength = lineHeader.length;
+    for (let pick of source) {
+      let result = Math.floor(pick * sides) + 1;
+      let resultString = result.toString();
+      if (outputLength + lineLength + resultString.length + (output.length ? 1 : 0) > MESSAGE_MAX_LENGTH) {
+        output.push(lineHeader + results.join(' '));
+        break mainLoop;
+      }
+      if (results.length) lineLength++;
+      results.push(resultString);
+      lineLength += resultString.length;
+    }
+    if (output.length) outputLength++;
+    let line = lineHeader + results.join(' ');
+    output.push(line);
+    outputLength += line.length;
+  }
+  let content = output.join('\n');
+  if (content.length > MESSAGE_MAX_LENGTH) {
+    log('command(roll): length over', output);
+    throw new Error('derp');
+  }
+  if (!content) {
+    if (!dice.length) content = 'invalid syntax, use <count>d<sides> [...]';
+    else content = 'too long';
+  }
+  await sendMessage(event.channel_id, { content });
+});
+let feedRandom = obj => inject.random.write(JSON.stringify(obj));
+gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
+gatewayEvents.on('MESSAGE_UPDATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
+gatewayEvents.on('MESSAGE_REACTION_ADD', ev => feedRandom([ev.user_id, ev.channel_id, ev.message_id, ev.emoji]));
+gatewayEvents.on('MESSAGE_REACTION_REMOVE', ev => feedRandom([ev.user_id, ev.channel_id, ev.message_id, ev.emoji]));
 
 async function runCommand(args, event) {
   log('command:', args[0], event);

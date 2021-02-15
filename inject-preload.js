@@ -3,6 +3,7 @@ const path = require('path');
 const fsP = require('fs').promises;
 const childProcess = require('child_process');
 const EventEmitter = require('events');
+const { Keccak } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
 
@@ -83,6 +84,82 @@ if (window.opener === null) {
     }
   }
   injectExports.makeLatexImage = makeLatexImage;
+}
+
+{
+  // c r y p t o g r a p h i c a l l y   s e c u r e
+  // it can roll dice!
+  const KECCAK_BITRATE = 512;
+  let keccak = new Keccak();
+  let keccakStream = keccak.absorbStream(KECCAK_BITRATE);
+  let randomFd = null;
+  let randomTimer = null;
+
+  async function randomStuff() {
+    let time1 = process.hrtime()[1];
+    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8);
+    let writeBuf = keccak.squeeze(KECCAK_BITRATE, KECCAK_BITRATE / 8);
+    await Promise.all([
+      randomFd.read(readBuf, 0, readBuf.length, null),
+      randomFd.write(writeBuf)
+    ]);
+    keccak.absorb(KECCAK_BITRATE, readBuf);
+    let timeBuf = keccak.squeeze(KECCAK_BITRATE, 2);
+    let time = timeBuf.readUInt16BE();
+    let time2 = process.hrtime()[1];
+    if (time2 < time1) time2 += 1e9;
+    let writeTimeBuf = Buffer.alloc(4);
+    writeTimeBuf.writeUInt32LE(time2 - time1);
+    keccakStream.write(writeTimeBuf);
+    randomTimer = setTimeout(randomStuff, time * 10);
+    log('random: periodic resync, tdelta', time2 - time1, 'scheduled', time * 10);
+  }
+
+  (async () => {
+    try {
+      // attempt open random device, will only work on linux
+      randomFd = await fsP.open('/dev/urandom', 'r+');
+      await randomStuff();
+      log('random: seeded from /dev/urandom');
+    } catch (err) {
+      // seed with crypto.randomBytes instead
+      keccak.absorb(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2));
+      log('random: seeded from crypto.randomBytes');
+    }
+  })();
+
+  const UINT48_MAX = 2 ** 48;
+  injectExports.random = {
+    write(s) {
+      let writeTimeBuf = Buffer.alloc(4);
+      writeTimeBuf.writeUInt32LE(process.hrtime()[1]);
+      keccakStream.write(writeTimeBuf);
+      keccakStream.write(s);
+    },
+    read(n, format = null) {
+      let buf = keccak.squeeze(KECCAK_BITRATE, n);
+      if (!format) return new Uint8Array(buf);
+      else return buf.toString(format);
+    },
+    float() {
+      let val = keccak.squeeze(KECCAK_BITRATE, 6).readUIntLE(0, 6);
+      return val / UINT48_MAX;
+    },
+    floatMany(n) {
+      let out = [];
+      let buf = keccak.squeeze(KECCAK_BITRATE, n * 6);
+      for (let i = 0; i < buf.length; i += 6) {
+        let val = buf.readUIntLE(i, 6);
+        out.push(val / UINT48_MAX);
+      }
+      return out;
+    },
+    readRaw() {
+      let out = keccak.state.slice(0, Math.floor(KECCAK_BITRATE / 64));
+      keccak.keccakf();
+      return out;
+    }
+  };
 }
 
 electron.contextBridge.exposeInMainWorld('inject', injectExports);
