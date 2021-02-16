@@ -5,6 +5,7 @@
 \usepackage{varwidth}
 \usepackage{amsmath}
 \usepackage{amsfonts}
+\usepackage{amsthm}
 \usepackage[version=4]{mhchem}
 \usepackage{graphicx}
 \usepackage{tikz}
