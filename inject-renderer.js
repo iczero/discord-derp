@@ -1171,7 +1171,7 @@ registerExternalCommand('roll', async (args, event) => {
     count = Math.floor(count);
     sides = Math.floor(sides);
     if (count <= 0 || count > 100) return null;
-    if (sides <= 0 || sides > 1e9) return null;
+    if (sides <= 1 || sides > 1e9) return null;
     return [count, sides];
   }).filter(Boolean).slice(0, 25);
   let output = [];
@@ -1200,7 +1200,7 @@ registerExternalCommand('roll', async (args, event) => {
   }
   let content = output.join('\n');
   if (content.length > MESSAGE_MAX_LENGTH) {
-    log('command(roll): length over', output);
+    log('command(roll): length over', output, output.map(s => s.length, content.length));
     throw new Error('derp');
   }
   if (!content) {

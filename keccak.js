@@ -79,10 +79,12 @@ function u64Rotate(n, r) {
 /**
  * The keccak-f[1600] function
  * @param {bigint[]} a The state (5x5 matrix of u64s)
+ * @param {number} rounds Number of rounds to perform
+ *   (SHA-3 uses 24, KangarooTwelve uses 12)
  * @return {bigint[]} Transformed state
  */
-function keccakf(a) {
-  for (let i = 0; i < 24; i++) a = keccakRound(a, RC[i]);
+function keccakf(a, rounds = 24) {
+  for (let i = 0; i < rounds; i++) a = keccakRound(a, RC[i]);
   return a;
 }
 
@@ -231,14 +233,15 @@ class KeccakWritable extends stream.Writable {
 
 // TODO: allow it to run on state lengths other than 1600
 class Keccak {
-  constructor() {
+  constructor(rounds = 24) {
     /** @type {bigint[]} */
     this.state = new Array(25).fill(0n);
+    this.rounds = rounds;
   }
 
   /** Run keccak-f on internal state */
   keccakf() {
-    keccakf(this.state);
+    keccakf(this.state, this.rounds);
   }
 
   /**

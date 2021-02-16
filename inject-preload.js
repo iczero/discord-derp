@@ -90,14 +90,16 @@ if (window.opener === null) {
   // c r y p t o g r a p h i c a l l y   s e c u r e
   // it can roll dice!
   const KECCAK_BITRATE = 512;
-  let keccak = new Keccak();
+  // use 12-round keccak
+  let keccak = new Keccak(12);
   let keccakStream = keccak.absorbStream(KECCAK_BITRATE);
   let randomFd = null;
   let randomTimer = null;
 
   async function randomStuff() {
     let time1 = process.hrtime()[1];
-    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8);
+    // -1 needed or padding will stick another block at the end
+    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8 - 1);
     let writeBuf = keccak.squeeze(KECCAK_BITRATE, KECCAK_BITRATE / 8);
     await Promise.all([
       randomFd.read(readBuf, 0, readBuf.length, null),
@@ -123,7 +125,7 @@ if (window.opener === null) {
       log('random: seeded from /dev/urandom');
     } catch (err) {
       // seed with crypto.randomBytes instead
-      keccak.absorb(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2));
+      keccak.absorb(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2 - 1));
       log('random: seeded from crypto.randomBytes');
     }
   })();
