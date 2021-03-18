@@ -87,7 +87,7 @@ if (window.opener === null) {
 }
 
 {
-  // c r y p t o g r a p h i c a l l y   s e c u r e
+  // C  R  Y  P  T  O  G  R  A  P  H  I  C  A  L  L  Y      S  E  C  U  R  E
   // it can roll dice!
   const KECCAK_BITRATE = 512;
   // use 12-round keccak

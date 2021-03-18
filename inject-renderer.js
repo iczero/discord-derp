@@ -1219,6 +1219,18 @@ registerExternalCommand('roll', async (args, event) => {
   }
   await sendMessage(event.channel_id, { content });
 });
+registerExternalCommand('randcolor', async (_args, event) => {
+  let canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  let ctx = canvas.getContext('2d');
+  let color = '#' + inject.random.read(3, 'hex');
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // webp alters the color slightly
+  let blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  await sendMessage(event.channel_id, { content: color, file: blob, filename: 'blob.png' });
+});
 let feedRandom = obj => inject.random.write(JSON.stringify(obj));
 gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
 gatewayEvents.on('MESSAGE_UPDATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
