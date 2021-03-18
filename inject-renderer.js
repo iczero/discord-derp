@@ -770,8 +770,16 @@ registerExternalCommand('getavatar', async (args, event) => {
   if (!mentions.length) return;
   let target = mentions[0].id;
   let user = userRegistry.getUser(target);
-  let url = new URL(user.getAvatarURL());
-  url.searchParams.set('size', '512');
+  log('command(getavatar): uid', user.id, 'avatar', user.avatar, 'avatarURL', user.avatarURL);
+  let url;
+  if (user.avatar) {
+    let ext = '.png';
+    if (user.avatar.startsWith('a_')) ext = '.gif';
+    url = new URL(`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}${ext}`);
+    url.searchParams.set('size', '512');
+  } else {
+    url = new URL(user.avatarURL, 'https://discordapp.com/');
+  }
   await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
 });
 registerExternalCommand('wa', async (args, event) => {
@@ -1185,7 +1193,9 @@ registerExternalCommand('roll', async (args, event) => {
     for (let pick of source) {
       let result = Math.floor(pick * sides) + 1;
       let resultString = result.toString();
-      if (outputLength + lineLength + resultString.length + (output.length ? 1 : 0) > MESSAGE_MAX_LENGTH) {
+      let newTotalLength = outputLength + lineLength + resultString.length +
+        (output.length ? 1 : 0) + (results.length ? 1 : 0);
+      if (newTotalLength > MESSAGE_MAX_LENGTH) {
         output.push(lineHeader + results.join(' '));
         break mainLoop;
       }
@@ -1200,7 +1210,7 @@ registerExternalCommand('roll', async (args, event) => {
   }
   let content = output.join('\n');
   if (content.length > MESSAGE_MAX_LENGTH) {
-    log('command(roll): length over', output, output.map(s => s.length, content.length));
+    log('command(roll): length over', output, output.map(s => s.length, content.length), content, content.length);
     throw new Error('derp');
   }
   if (!content) {
