@@ -656,6 +656,28 @@ gatewayEvents.on('MESSAGE_DELETE', event => {
   */
 });
 
+/**
+ * Generate v4 uuid
+ * @returns {string}
+ */
+function uuid() {
+  let buf = inject.random.read(16);
+  // see https://github.com/uuidjs/uuid/blob/master/src/v4.js
+  buf[6] = (buf[6] & 0b00001111) | 0x40; // set version
+  buf[8] = (buf[8] & 0b00111111) | 0b10000000; // set "clock sequence" bits
+  
+  // 4-2-2-2-6
+  // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  let byteToHex = byte => ((byte & 0xf0) >> 4).toString(16) + (byte & 0x0f).toString(16);
+  let idx = 0;
+  let uuid = [4, 2, 2, 2, 6].map(count => {
+    let ret = '';
+    for (let i = 0; i < count; i++) ret += byteToHex(buf[idx++]);
+    return ret;
+  }).join('-');
+  return uuid;
+}
+
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
@@ -1219,17 +1241,30 @@ registerExternalCommand('roll', async (args, event) => {
   }
   await sendMessage(event.channel_id, { content });
 });
-registerExternalCommand('randcolor', async (_args, event) => {
+registerExternalCommand('color', async (args, event) => {
   let canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
   let ctx = canvas.getContext('2d');
-  let color = '#' + inject.random.read(3, 'hex');
-  ctx.fillStyle = color;
+  let color;
+  if (args.length > 1) color = args.slice(1).join(' ');
+  else color = '#' + inject.random.read(3, 'hex');
+  // normalize color
+  let testStyle = document.createElement('div').style;
+  testStyle.color = color;
+  if (!testStyle.color) {
+    await sendMessage(event.channel_id, { content: 'invalid color' });
+    return;
+  }
+  ctx.fillStyle = testStyle.color;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   // webp alters the color slightly
   let blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-  await sendMessage(event.channel_id, { content: color, file: blob, filename: 'blob.png' });
+  await sendMessage(event.channel_id, { content: testStyle.color, file: blob, filename: 'blob.png' });
+});
+registerExternalCommand('uuid', async (_args, event) => {
+  // generate v4 uuid
+  await sendMessage(event.channel_id, { content: '`' + uuid() + '`' });
 });
 let feedRandom = obj => inject.random.write(JSON.stringify(obj));
 gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
