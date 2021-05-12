@@ -65,7 +65,8 @@ const resolvedModules = resolveModules({
   messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
   gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
   media: m => m.default && typeof m.default.getMediaEngine === 'function',
-  rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function'
+  rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
+  experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -462,6 +463,16 @@ function logArgs(name) {
     console.groupEnd(name);
   }
 }
+
+// force enable developer mode
+Object.defineProperty(resolvedModules.experiments.default, 'isDeveloper', {
+  configurable: false,
+  enumerable: false,
+  get: () => true,
+  set: () => {
+    throw new Error('santa will not be giving you presents');
+  }
+});
 
 // mpv override lmao
 // note: is very bad, do not use, can and will delete discord to autoplay gifs
