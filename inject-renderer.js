@@ -55,6 +55,7 @@ const resolvedModules = resolveModules({
   channels: m => m.default && typeof m.default.getChannel === 'function',
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
   guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
+  guildChannels: m => m.default && typeof m.default.getChannels === 'function' && m.GUILD_SELECTABLE_CHANNELS_KEY,
   guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
   emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStore',
   permissions: m => m.default && typeof m.default.getChannelPermissions === 'function',
@@ -90,6 +91,7 @@ const messageQueue = resolvedModules.messageQueue.default;
 const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 const emojiRegistry = resolvedModules.emojis.default;
 const EmojiDisambiguations = resolvedModules.emojis.EmojiDisambiguations;
+const guildChannelRegistry = resolvedModules.guildChannels.default;
 
 // late load modules
 let messageHooks = null;
@@ -693,7 +695,7 @@ function uuid() {
 let enableCommands = true;
 const PREFIX = '=';
 const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639']);
-const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override']);
+const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override', 'ordel']);
 const MESSAGE_MAX_LENGTH = 2000;
 const EMBED_MAX_LENGTH = 2000;
 const EMBED_MAX_FIELDS = 25;
@@ -735,8 +737,10 @@ function registerExternalCommand(name, fn) {
 
 registerExternalCommand('override', async (args, event) => {
   if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  if (args[0] === 'ordel') api.delete(Endpoints.MESSAGE(event.channel_id, event.id));
   runCommand(args.slice(1), event);
 });
+registerExternalCommand('ordel', 'override');
 registerExternalCommand('guildcommands', async (args, event) => {
   if (event.author.id !== userRegistry.getCurrentUser().id) return;
   let subcommand = args[1].toLowerCase();
