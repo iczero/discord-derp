@@ -67,7 +67,8 @@ const resolvedModules = resolveModules({
   gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
   media: m => m.default && typeof m.default.getMediaEngine === 'function',
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
-  experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined'
+  experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
+  slowmode: m => m.default && typeof m.SlowmodeType === 'object'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -92,6 +93,7 @@ const MessageDataType = resolvedModules.messageQueue.MessageDataType;
 const emojiRegistry = resolvedModules.emojis.default;
 const EmojiDisambiguations = resolvedModules.emojis.EmojiDisambiguations;
 const guildChannelRegistry = resolvedModules.guildChannels.default;
+const SlowmodeType = resolvedModules.slowmode.SlowmodeType;
 
 // late load modules
 let messageHooks = null;
@@ -401,7 +403,8 @@ gatewayEvents.on('MESSAGE_CREATE', event => {
     slowmodeQueue.restartCooldown(event.channel_id);
     // inform ui as well
     dispatcher.dispatch({
-      type: ActionTypes.SLOWMODE_START_COOLDOWN,
+      type: ActionTypes.SLOWMODE_RESET_COOLDOWN,
+      slowmodeType: SlowmodeType.SendMessage,
       channelId: event.channel_id
     });
 
