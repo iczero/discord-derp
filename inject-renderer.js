@@ -64,7 +64,7 @@ const resolvedModules = resolveModules({
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
   messages: m => m.default && typeof m.default.getMessages === 'function',
   messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
-  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype._discover,
+  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype.isConnected,
   media: m => m.default && typeof m.default.getMediaEngine === 'function',
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
   experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
