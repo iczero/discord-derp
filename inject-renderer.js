@@ -174,7 +174,7 @@ dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
   currentGuild = event.guildId;
   currentChannel = event.channelId;
 });
-function switchToChannel(id) {
+function jumpToChannel(id) {
   let channel = channelRegistry.getChannel(id);
   if (!channel) throw new Error('channel not found');
   dispatcher.dispatch({
@@ -697,7 +697,7 @@ function uuid() {
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
-const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639']);
+const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639', '645755975889977354']);
 const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override', 'ordel']);
 const MESSAGE_MAX_LENGTH = 2000;
 const EMBED_MAX_LENGTH = 2000;
@@ -1090,25 +1090,29 @@ registerExternalCommand('cross', async (args, event) => {
   await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
 });
 
-async function renderLatex(input, mode) {
-  // handle latex codeblocks
+/**
+ * Parse out code blocks in input, optionally of specific types
+ * @param {string} input
+ * @param {string[]} [types]
+ */
+function parseCodeblocks(input, types = []) {
   let codeblocks = [...input.matchAll(/`{3}(?:(\w+)\n)?(.+?)`{3}/gs)];
   if (codeblocks.length) {
     let inBlocks;
-    // look for specifically matched latex codeblocks
+    // look for codeblocks with the correct types
     // match group 1 is language tag
-    let latexBlocks = codeblocks.filter(match => match[1] && ['latex', 'tex'].includes(match[1].toLowerCase()));
-    if (latexBlocks.length) {
-      // input has explicit latex blocks, use those
-      inBlocks = latexBlocks;
+    let targetBlocks = codeblocks.filter(match => match[1] && types.includes(match[1].toLowerCase()));
+    if (targetBlocks.length) {
+      // input has matching code blocks, use those
+      inBlocks = targetBlocks;
     } else {
-      // no explicit latex blocks found
+      // no blocks with matching type found
       let untypedBlocks = codeblocks.filter(match => !match[1]);
       if (untypedBlocks.length) {
         // untyped blocks found, use those
         inBlocks = untypedBlocks;
       } else {
-        // no latex or untyped blocks? assume typo and use all blocks
+        // all blocks are of the wrong type? assume typo and use all blocks
         inBlocks = codeblocks;
       }
     }
@@ -1117,6 +1121,10 @@ async function renderLatex(input, mode) {
     // simple inline codeblock that spans the entire message
     input = input.slice(1, -1);
   }
+  return input;
+}
+async function renderLatex(input, mode) {
+  input = parseCodeblocks(input, ['latex', 'tex']);
   // trim is necessary otherwise latex takes two newlines as \par
   if (mode === 'math') input = `\\[\n${input.trim()}\n\\]`;
   let result = await inject.makeLatexImage(input);
@@ -1284,11 +1292,39 @@ registerExternalCommand('uuid', async (_args, event) => {
   // generate v4 uuid
   await sendMessage(event.channel_id, { content: '`' + uuid() + '`' });
 });
-let feedRandom = obj => inject.random.write(JSON.stringify(obj));
-gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
-gatewayEvents.on('MESSAGE_UPDATE', ev => feedRandom([ev.channel_id, ev.author?.id, ev.content]));
-gatewayEvents.on('MESSAGE_REACTION_ADD', ev => feedRandom([ev.user_id, ev.channel_id, ev.message_id, ev.emoji]));
-gatewayEvents.on('MESSAGE_REACTION_REMOVE', ev => feedRandom([ev.user_id, ev.channel_id, ev.message_id, ev.emoji]));
+/*
+registerExternalCommand('eval', async (args, event) => {
+  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  let input = parseCodeblocks(args.slice(1).join(' '), ['js']);
+  let result;
+  try {
+    result = eval(input);
+  } catch (err) {
+    result = err;
+  }
+  await sendMessage(event.channel_id, {
+    content: '```js\n' + inject.inspect(result).slice(0, MESSAGE_MAX_LENGTH - 9) + '```'
+  });
+});
+registerExternalCommand('preloadeval', async (args, event) => {
+  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+  let input = parseCodeblocks(args.slice(1).join(' '), ['js']);
+  let result;
+  try {
+    result = inject.evalInPreload(input);
+  } catch (err) {
+    result = err;
+  }
+  await sendMessage(event.channel_id, {
+    content: '```js\n' + inject.inspect(result).slice(0, MESSAGE_MAX_LENGTH - 9) + '```'
+  });
+});
+*/
+let feedRandom = (...obj) => inject.random.write(JSON.stringify(obj).slice(1, -1));
+gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom(ev.channel_id, ev.author?.id, ev.content));
+gatewayEvents.on('MESSAGE_UPDATE', ev => feedRandom(ev.channel_id, ev.author?.id, ev.id, ev.content));
+gatewayEvents.on('MESSAGE_REACTION_ADD', ev => feedRandom(ev.user_id, ev.channel_id, ev.message_id, ev.emoji?.name, ev.emoji?.id));
+gatewayEvents.on('MESSAGE_REACTION_REMOVE', ev => feedRandom(ev.user_id, ev.channel_id, ev.message_id, ev.emoji?.name, ev.emoji?.id));
 
 async function runCommand(args, event) {
   log('command:', args[0], event);

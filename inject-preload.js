@@ -3,6 +3,7 @@ const path = require('path');
 const fsP = require('fs').promises;
 const childProcess = require('child_process');
 const EventEmitter = require('events');
+const util = require('util');
 const { Keccak } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
@@ -163,5 +164,13 @@ if (window.opener === null) {
     }
   };
 }
+
+/*
+{
+  // idk but it seemed to be useful
+  injectExports.inspect = util.inspect.bind(null);
+  injectExports.evalInPreload = stuff => eval(stuff);
+}
+*/
 
 electron.contextBridge.exposeInMainWorld('inject', injectExports);
