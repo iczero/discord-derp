@@ -64,11 +64,12 @@ const resolvedModules = resolveModules({
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
   messages: m => m.default && typeof m.default.getMessages === 'function',
   messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
-  gateway: m => typeof m.default === 'function' && m.default.prototype._connect && m.default.prototype.isConnected,
+  gateway: m => typeof m.default === 'function' && m.default.prototype && m.default.prototype._connect && m.default.prototype.isConnected,
   media: m => m.default && typeof m.default.getMediaEngine === 'function',
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
   experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
-  slowmode: m => m.default && typeof m.SlowmodeType === 'object'
+  slowmode: m => m.default && typeof m.SlowmodeType === 'object',
+  stickers: m => m && m.default && typeof m.default.getStickerById === 'function'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -94,6 +95,7 @@ const emojiRegistry = resolvedModules.emojis.default;
 const EmojiDisambiguations = resolvedModules.emojis.EmojiDisambiguations;
 const guildChannelRegistry = resolvedModules.guildChannels.default;
 const SlowmodeType = resolvedModules.slowmode.SlowmodeType;
+const stickerRegistry = resolvedModules.stickers.default;
 
 // late load modules
 let messageHooks = null;
@@ -164,7 +166,13 @@ GatewaySocket.prototype.connect = function connect() {
   gatewaySocket = this;
   gatewayConnectOriginal.call(this);
   lateResolveModules();
-  gatewaySocket.on('dispatch', (event, ...args) => gatewayEvents.emit(event, ...args));
+  gatewaySocket.on('dispatch', (event, ...args) => {
+    try {
+      gatewayEvents.emit(event, ...args);
+    } catch (err) {
+      inject.console.error('error in gateway events handler:', err);
+    }
+  });
 }
 
 // expose convenience variables for usage in devtools
@@ -236,9 +244,9 @@ function sendMessageDirect(channel, body) {
     }, result => {
       if (!result.ok) {
         messageActions.sendBotMessage(currentChannel,
-          `**Warning**: send message to channel ${message.channelId} failed` + 
-          '```json\n// sent message\n' + JSON.stringify(body, null, 2) + '\n```' + 
-          '```json\n// server response\n' + JSON.stringify(result, null, 4) + '\n```'
+          `**Warning**: send message to channel ${message.channelId} failed` +
+          '```json\n// sent message\n' + JSON.stringify(body, null, 2) + '\n```' +
+          '```json\n// server response\n' + JSON.stringify(result, null, 2) + '\n```'
         );
         reject(result);
       } else resolve(result);
@@ -312,12 +320,9 @@ class SlowmodeQueue {
    */
   async sendOrEnqueue(channelId, body) {
     let shouldQueue = this.shouldQueue(channelId);
-    if (!shouldQueue && getEffectiveSlowmodeCooldown(channelId)) {
-      // if bypassing queue on slowmoded channel, ensure next message will be queued
-      this.restartCooldown(channelId);
-    }
+    let hasSlowmode = Boolean(getEffectiveSlowmodeCooldown(channelId));
 
-    if (!shouldQueue) {
+    if (!shouldQueue && !hasSlowmode) {
       if (typeof body === 'function') body = body(0);
       return await sendMessageDirect(channelId, body);
     } else return await slowmodeQueue.enqueue(channelId, body);
@@ -357,7 +362,7 @@ class SlowmodeQueue {
     let delay = this.queryCooldown(channelId);
     if (delay) {
       // reschedule to later
-      log(`slowmode: rescheduling drain for channel ${channelId} (${delay} ms remaining)`);
+      log(`slowmode: drain called while cooldown active, rescheduling drain for channel ${channelId} (${delay} ms remaining)`);
       setTimeout(() => this.drain(channelId), delay);
       return;
     }
@@ -368,15 +373,17 @@ class SlowmodeQueue {
     let result;
     try {
       result = await sendMessageDirect(channelId, body);
+      top.deferred.resolve(result);
     } catch (err) {
       if (err.status === 429 && err.body.code === 20016) {
+        let delay = err.body.retry_after * 1000;
+        log(`slowmode: ratelimited by api, rescheduling drain for channel ${channelId} (${delay} ms remaining)`);
         top.retry++;
         queue.push(top);
-        setTimeout(() => this.drain(channelId), err.body.retry_after * 1000);
+        setTimeout(() => this.drain(channelId), delay);
         return;
       } else top.deferred.reject(err);
     }
-    top.deferred.resolve(result);
 
     if (!queue.length) this.channelQueues.delete(channelId);
     let ratelimit = getEffectiveSlowmodeCooldown(channelId);
@@ -594,8 +601,8 @@ class MessageUpdateHandler {
   /**
    * The constructor
    * @param {string} channelId
-   * @param {string} messageId 
-   * @param {(event: any, handler: MessageUpdateHandler) => any} handler 
+   * @param {string} messageId
+   * @param {(event: any, handler: MessageUpdateHandler) => any} handler
    * @param {number?} timeout
    */
   constructor(channelId, messageId, handler, timeout = 60000) {
@@ -681,7 +688,7 @@ function uuid() {
   // see https://github.com/uuidjs/uuid/blob/master/src/v4.js
   buf[6] = (buf[6] & 0b00001111) | 0x40; // set version
   buf[8] = (buf[8] & 0b00111111) | 0b10000000; // set "clock sequence" bits
-  
+
   // 4-2-2-2-6
   // xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
   let byteToHex = byte => ((byte & 0xf0) >> 4).toString(16) + (byte & 0x0f).toString(16);
@@ -697,7 +704,7 @@ function uuid() {
 // stupid commands
 let enableCommands = true;
 const PREFIX = '=';
-const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639', '645755975889977354']);
+const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639', '645755975889977354', '377970285552599040']);
 const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override', 'ordel']);
 const MESSAGE_MAX_LENGTH = 2000;
 const EMBED_MAX_LENGTH = 2000;
@@ -1288,9 +1295,21 @@ registerExternalCommand('color', async (args, event) => {
   let blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
   await sendMessage(event.channel_id, { content: testStyle.color, file: blob, filename: 'blob.png' });
 });
-registerExternalCommand('uuid', async (_args, event) => {
+registerExternalCommand('uuid', async (args, event) => {
   // generate v4 uuid
-  await sendMessage(event.channel_id, { content: '`' + uuid() + '`' });
+  let count = +args[1];
+  if (Number.isNaN(count) || count < 1) count = 1;
+  const LINE_LENGTH = 38; // uuid and backticks
+  let out = [];
+  let outLength = 0;
+  for (let i = 0; i < count; i++) {
+    let newLength = outLength + LINE_LENGTH;
+    if (out.length) newLength += 1;
+    if (newLength > MESSAGE_MAX_LENGTH) break;
+    out.push(`\`${uuid()}\``);
+    outLength = newLength;
+  }
+  await sendMessage(event.channel_id, { content: out.join('\n') });
 });
 /*
 registerExternalCommand('eval', async (args, event) => {
