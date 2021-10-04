@@ -381,6 +381,13 @@ class SlowmodeQueue {
         top.retry++;
         queue.push(top);
         setTimeout(() => this.drain(channelId), delay);
+        // inform ui
+        dispatcher.dispatch({
+          type: ActionTypes.SLOWMODE_SET_COOLDOWN,
+          slowmodeType: SlowmodeType.SendMessage,
+          channelId,
+          cooldownMs: delay
+        });
         return;
       } else top.deferred.reject(err);
     }
@@ -1191,6 +1198,28 @@ registerExternalCommand('tex', async (args, event) => {
   editHandler.register();
 });
 registerExternalCommand('math', 'tex');
+registerExternalCommand('align', async (args, event) => {
+  if (args.length < 2) {
+    await sendMessage(event.channel_id, { content: 'usage: align protein <fasta>' });
+    return;
+  }
+  // sadness
+  let fullArgs = args.slice(1).join(' ');
+  let separator = fullArgs.match(/\s/).index;
+  let mode = fullArgs.slice(0, separator);
+  let input = parseCodeblocks(fullArgs.slice(separator + 1), []);
+  let result;
+  // TODO: align nucleotide
+  if (mode === 'protein') {
+    result = await inject.align.clustalo(input);
+  } else {
+    await sendMessage(event.channel_id, { content: 'unknown mode' });
+    return;
+  }
+  await sendMessage(event.channel_id, {
+    content: '```\n' + result.slice(0, MESSAGE_MAX_LENGTH - 8) + '\n```'
+  });
+});
 registerExternalCommand('random', async (args, event) => {
   let splitArgs = args.slice(1).map(a => a.toLowerCase());
   let short = false;

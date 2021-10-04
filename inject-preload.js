@@ -165,6 +165,28 @@ if (window.opener === null) {
   };
 }
 
+{
+  async function clustalo(input) {
+    let proc = childProcess.spawn('clustalo',
+      ['-i', '-', '--outfmt=clustal', '--resno'],
+      {
+        stdio: ['pipe', 'pipe', 'pipe']
+      }
+    );
+    proc.stdin.write(input);
+    let outputBuffers = [];
+    proc.stdout.on('data', d => outputBuffers.push(d));
+    proc.stderr.on('data', d => outputBuffers.push(d));
+    // ?????
+    setImmediate(() => proc.stdin.end());
+    await EventEmitter.once(proc, 'exit');
+    return Buffer.concat(outputBuffers).toString();
+  }
+  injectExports.align = {
+    clustalo
+  };
+}
+
 /*
 {
   // idk but it seemed to be useful
