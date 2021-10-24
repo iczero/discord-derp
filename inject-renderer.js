@@ -1199,7 +1199,7 @@ registerExternalCommand('tex', async (args, event) => {
 });
 registerExternalCommand('math', 'tex');
 registerExternalCommand('align', async (args, event) => {
-  if (args.length < 2) {
+  if (args.length < 3) {
     await sendMessage(event.channel_id, { content: 'usage: align protein <fasta>' });
     return;
   }
@@ -1391,10 +1391,23 @@ function splitCommandMessage(content) {
   return args;
 }
 
+const RANDOM_SYNC_CHANNEL = '354791708275507200';
+
 gatewayEvents.on('MESSAGE_CREATE', async event => {
   if (!enableCommands) return;
   let channel = channelRegistry.getChannel(event.channel_id);
   if (!channel) return;
+
+  // listen to sync requests from RANDOM_SYNC_CHANNEL
+  if (event.channel_id === RANDOM_SYNC_CHANNEL) {
+    if (event.content.includes('!do-random-sync')) {
+      await sendMessage(event.channel_id, {
+        content: '!random-sync ' + inject.random.read(64, 'base64')
+      });
+    }
+  }
+
+  // handle commands
   if (!event.content.startsWith(PREFIX)) return;
   let args = splitCommandMessage(event.content);
   if (!ALLOWED_GUILDS.has(event.guild_id)) {

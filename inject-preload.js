@@ -3,7 +3,7 @@ const path = require('path');
 const fsP = require('fs').promises;
 const childProcess = require('child_process');
 const EventEmitter = require('events');
-const util = require('util');
+// const util = require('util');
 const { Keccak } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
@@ -166,6 +166,12 @@ if (window.opener === null) {
 }
 
 {
+  /**
+   * Align protein sequences with clustalo
+   * Because why not
+   * @param {string} input Alignment input
+   * @returns {string}
+   */
   async function clustalo(input) {
     let proc = childProcess.spawn('clustalo',
       ['-i', '-', '--outfmt=clustal', '--resno'],
