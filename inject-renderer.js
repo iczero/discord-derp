@@ -69,7 +69,8 @@ const resolvedModules = resolveModules({
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
   experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
   slowmode: m => m.default && typeof m.SlowmodeType === 'object',
-  stickers: m => m && m.default && typeof m.default.getStickerById === 'function'
+  stickers: m => m && m.default && typeof m.default.getStickerById === 'function',
+  guildAvatars: m => m && m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -96,6 +97,7 @@ const EmojiDisambiguations = resolvedModules.emojis.EmojiDisambiguations;
 const guildChannelRegistry = resolvedModules.guildChannels.default;
 const SlowmodeType = resolvedModules.slowmode.SlowmodeType;
 const stickerRegistry = resolvedModules.stickers.default;
+const guildAvatarRegistry = resolvedModules.guildAvatars.default;
 
 // late load modules
 let messageHooks = null;
@@ -824,17 +826,29 @@ registerExternalCommand('getavatar', async (args, event) => {
   if (!mentions.length) return;
   let target = mentions[0].id;
   let user = userRegistry.getUser(target);
-  log('command(getavatar): uid', user.id, 'avatar', user.avatar, 'avatarURL', user.avatarURL);
-  let url;
+  let globalUrl;
+  let guildUrl;
   if (user.avatar) {
-    let ext = '.png';
-    if (user.avatar.startsWith('a_')) ext = '.gif';
-    url = new URL(`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}${ext}`);
-    url.searchParams.set('size', '512');
+    let ext = 'png';
+    if (user.avatar.startsWith('a_')) ext = 'gif';
+    globalUrl = new URL(`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${ext}`);
+    globalUrl.searchParams.set('size', '512');
   } else {
-    url = new URL(user.avatarURL, 'https://discordapp.com/');
+    globalUrl = new URL(user.avatarURL, 'https://discordapp.com/');
   }
-  await sendMessage(event.channel_id, { content: 'URL: ' + url.href });
+  let guildAvatarId = user.guildMemberAvatars[event.guild_id];
+  if (guildAvatarId) {
+    let ext = 'png';
+    if (guildAvatarId.startsWith('a_')) ext = 'gif';
+    guildUrl = new URL(
+      Endpoints.GUILD_MEMBER_AVATAR(event.guild_id, user.id, guildAvatarId, ext),
+      'https://cdn.discordapp.com/'
+    );
+    guildUrl.searchParams.set('size', '512');
+  }
+  let reply = 'Global URL: ' + globalUrl.href;
+  if (guildUrl) reply += '\nGuild URL: ' + guildUrl.href;
+  await sendMessage(event.channel_id, { content: reply });
 });
 registerExternalCommand('wa', async (args, event) => {
   let query = args.slice(1).join(' ').replace(/\n/g, ' ');
