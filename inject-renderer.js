@@ -6,12 +6,11 @@ window.__SENTRY__.globalEventProcessors = [() => null];
 window.__SENTRY__ = null;
 window.DiscordSentry = null;
 
-// push a module named 10000000 that exports require(), then run it immediately
+// push a fake module and get webpack's require
 // require.c contains all modules registered with webpack
-const modulesList = window.webpackJsonp.push([
-  [], { 10000000: (module, _exports, require) => module.exports = require.c },
-  [[10000000]]
-]);
+let webpackRequire;
+window.webpackChunkdiscord_app.push([['_inject'], {}, r => webpackRequire = r]);
+const modulesList = webpackRequire.c;
 const require = n => modulesList[n].exports;
 
 /**
@@ -45,7 +44,7 @@ function resolveModules(def) {
 // hardcoding numbers is bad as they change literally every week with new builds
 // find modules by searching for matching exports instead
 const resolvedModules = resolveModules({
-  react: m => typeof m.version === 'string' && m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED,
+  react: m => typeof m.version === 'string' && m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED && typeof m.createElement === 'function',
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
   dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
   superagent: m => typeof m === 'function' && typeof m.get === 'function' && typeof m.post === 'function',
@@ -60,7 +59,7 @@ const resolvedModules = resolveModules({
   emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStore',
   permissions: m => m.default && typeof m.default.getChannelPermissions === 'function',
   events: m => typeof m.EventEmitter === 'function',
-  reactDOM: m => typeof m.render === 'function' && typeof m.hydrate === 'function',
+  reactDOM: m => m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED && typeof m.render === 'function' && typeof m.hydrate === 'function',
   messageActions: m => m.default && typeof m.default.sendMessage === 'function' && typeof m.default.jumpToMessage === 'function',
   messages: m => m.default && typeof m.default.getMessages === 'function',
   messageQueue: m => m.MessageDataType && m.default && typeof m.default.enqueue === 'function',
@@ -110,12 +109,12 @@ let ApplicationCommandOptionType = null;
 function lateResolveModules() {
   log('resolving late modules');
   Object.assign(resolvedModules, resolveModules({
-    messageHooks: m => typeof m.useClickMessage === 'function',
-    replyHandler: m => typeof m.createPendingReply === 'function',
+    messageHooks: m => m && typeof m.useClickMessage === 'function',
+    replyHandler: m => m && typeof m.createPendingReply === 'function',
     // this has got to be the hackiest one yet
-    setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
-    commands: m => typeof m.getBuiltInCommands === 'function',
-    commandTypes: m => typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
+    setUnreadPosition: m => m && typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
+    commands: m => m && typeof m.getBuiltInCommands === 'function',
+    commandTypes: m => m && typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
   }));
 
   messageHooks = resolvedModules.messageHooks;
@@ -167,14 +166,18 @@ GatewaySocket.prototype.connect = function connect() {
   log('intercepted GatewaySocket.connect');
   gatewaySocket = this;
   gatewayConnectOriginal.call(this);
-  lateResolveModules();
-  gatewaySocket.on('dispatch', (event, ...args) => {
-    try {
-      gatewayEvents.emit(event, ...args);
-    } catch (err) {
-      inject.console.error('error in gateway events handler:', err);
-    }
-  });
+  try {
+    lateResolveModules();
+    gatewaySocket.on('dispatch', (event, ...args) => {
+      try {
+        gatewayEvents.emit(event, ...args);
+      } catch (err) {
+        inject.console.error('error in gateway events handler:', err);
+      }
+    });
+  } catch (err) {
+    inject.console.error('error in GatewaySocket monkeypatch', err);
+  }
 }
 
 // expose convenience variables for usage in devtools
