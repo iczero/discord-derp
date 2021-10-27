@@ -322,51 +322,26 @@ class Keccak {
     let b = this.b;
     let c = this.c;
     let d = this.d;
+
     // θ step
+    // unrolling provides performance gain
     u64XorMany(c[0], a[0], a[5], a[10], a[15], a[20]);
     u64XorMany(c[1], a[1], a[6], a[11], a[16], a[21]);
     u64XorMany(c[2], a[2], a[7], a[12], a[17], a[22]);
     u64XorMany(c[3], a[3], a[8], a[13], a[18], a[23]);
     u64XorMany(c[4], a[4], a[9], a[14], a[19], a[24]);
 
-    u64Rotate(d[0], c[1], 1);
-    u64XorTwo(d[0], d[0], c[4]);
-    u64Rotate(d[1], c[2], 1);
-    u64XorTwo(d[1], d[1], c[0]);
-    u64Rotate(d[2], c[3], 1);
-    u64XorTwo(d[2], d[2], c[1]);
-    u64Rotate(d[3], c[4], 1);
-    u64XorTwo(d[3], d[3], c[2]);
-    u64Rotate(d[4], c[0], 1);
-    u64XorTwo(d[4], d[4], c[3]);
+    for (let x = 0; x < 5; x++) {
+      u64Rotate(d[x], c[(x + 1) % 5], 1);
+      u64XorInplace(d[x], c[(x + 4) % 5]);
+    }
 
-    u64XorTwo(a[0], a[0], d[0]);
-    u64XorTwo(a[1], a[1], d[1]);
-    u64XorTwo(a[2], a[2], d[2]);
-    u64XorTwo(a[3], a[3], d[3]);
-    u64XorTwo(a[4], a[4], d[4]);
-    u64XorTwo(a[5], a[5], d[0]);
-    u64XorTwo(a[6], a[6], d[1]);
-    u64XorTwo(a[7], a[7], d[2]);
-    u64XorTwo(a[8], a[8], d[3]);
-    u64XorTwo(a[9], a[9], d[4]);
-    u64XorTwo(a[10], a[10], d[0]);
-    u64XorTwo(a[11], a[11], d[1]);
-    u64XorTwo(a[12], a[12], d[2]);
-    u64XorTwo(a[13], a[13], d[3]);
-    u64XorTwo(a[14], a[14], d[4]);
-    u64XorTwo(a[15], a[15], d[0]);
-    u64XorTwo(a[16], a[16], d[1]);
-    u64XorTwo(a[17], a[17], d[2]);
-    u64XorTwo(a[18], a[18], d[3]);
-    u64XorTwo(a[19], a[19], d[4]);
-    u64XorTwo(a[20], a[20], d[0]);
-    u64XorTwo(a[21], a[21], d[1]);
-    u64XorTwo(a[22], a[22], d[2]);
-    u64XorTwo(a[23], a[23], d[3]);
-    u64XorTwo(a[24], a[24], d[4]);
+    for (let i = 0; i < 25; i++) {
+      u64XorInplace(a[i], d[i % 5]);
+    }
 
     // ρ and π steps
+    // unrolling provides performance gain
     u64Rotate(b[0], a[0], 0);
     u64Rotate(b[10], a[1], 1);
     u64Rotate(b[20], a[2], 62);
@@ -394,17 +369,16 @@ class Keccak {
     u64Rotate(b[4], a[24], 14);
 
     // χ step
-    // unrolling this hurts performance, idk why
     for (let i = 0; i < 25; i++) {
       let x = i % 5;
       let y = Math.floor(i / 5);
       u64XorTwo(a[i], b[y * 5 + ((x + 1) % 5)], SIXTY_FOUR_BIT);
       u64AndInplace(a[i], b[y * 5 + ((x + 2) % 5)]);
-      u64XorTwo(a[i], a[i], b[i]);
+      u64XorInplace(a[i], b[i]);
     }
 
     // ι step
-    u64XorTwo(a[0], a[0], rc);
+    u64XorInplace(a[0], rc);
   }
 
   /**
