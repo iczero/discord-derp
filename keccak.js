@@ -109,7 +109,7 @@ function u64Rotate(output, n, r) {
  * @param {U64Pair} output Array to put output value
  * @param {...U64Pair} args Inputs
  */
-function u64Xor(output, ...args) {
+function u64XorMany(output, ...args) {
   let a = 0;
   let b = 0;
   for (let i = 0; i < args.length; i++) {
@@ -121,19 +121,34 @@ function u64Xor(output, ...args) {
 }
 
 /**
- * AND two or more u64s
+ * XOR exactly two u64s
  * @param {U64Pair} output Array to put output value
- * @param {...U64Pair} args Inputs
+ * @param {U64Pair} a First input
+ * @param {U64Pair} b Second input
  */
-function u64And(output, ...args) {
-  let a = 0xFFFFFFFF;
-  let b = 0xFFFFFFFF;
-  for (let i = 0; i < args.length; i++) {
-    a = (a & args[i][0]) >>> 0;
-    b = (b & args[i][1]) >>> 0;
-  }
-  output[0] = a;
-  output[1] = b;
+function u64XorTwo(output, a, b) {
+  output[0] = (a[0] ^ b[0]) >>> 0;
+  output[1] = (a[1] ^ b[1]) >>> 0;
+}
+
+/**
+ * XOR another value with first parameter, storing result in first parameter
+ * @param {U64Pair} output Array to put output value
+ * @param {U64Pair} p Input
+ */
+function u64XorInplace(output, p) {
+  output[0] = (output[0] ^ p[0]) >>> 0;
+  output[1] = (output[1] ^ p[1]) >>> 0;
+}
+
+/**
+ * AND another value with first parameter, storing result in first parameter
+ * @param {U64Pair} output Array to put output value
+ * @param {U64Pair} p Input
+ */
+function u64AndInplace(output, p) {
+  output[0] = (output[0] & p[0]) >>> 0;
+  output[1] = (output[1] & p[1]) >>> 0;
 }
 
 /**
@@ -162,14 +177,14 @@ let d = new Array(5).fill(null).map(() => [0, 0]);
 function keccakRoundOriginal(a, rc) { // eslint-disable-line no-unused-vars
   // θ step
   for (let x = 0; x < 5; x++) {
-    u64Xor(c[x], a[xytoi(x, 0)], a[xytoi(x, 1)], a[xytoi(x, 2)], a[xytoi(x, 3)], a[xytoi(x, 4)]);
+    u64XorMany(c[x], a[xytoi(x, 0)], a[xytoi(x, 1)], a[xytoi(x, 2)], a[xytoi(x, 3)], a[xytoi(x, 4)]);
   }
   for (let x = 0; x < 5; x++) {
     u64Rotate(d[x], c[(x + 1) % 5], 1);
-    u64Xor(d[x], d[x], c[(x + 4) % 5]);
+    u64XorInplace(d[x], c[(x + 4) % 5]);
   }
   for (let i = 0; i < 25; i++) {
-    u64Xor(a[i], a[i], d[i % 5]);
+    u64XorInplace(a[i], d[i % 5]);
   }
 
   // ρ and π steps
@@ -182,13 +197,13 @@ function keccakRoundOriginal(a, rc) { // eslint-disable-line no-unused-vars
   // χ step
   for (let i = 0; i < 25; i++) {
     let [x, y] = itoxy(i);
-    u64Xor(a[i], b[xytoi(x + 1, y)], SIXTY_FOUR_BIT);
-    u64And(a[i], a[i], b[xytoi(x + 2, y)]);
-    u64Xor(a[i], a[i], b[i]);
+    u64XorTwo(a[i], b[xytoi(x + 1, y)], SIXTY_FOUR_BIT);
+    u64AndInplace(a[i], b[xytoi(x + 2, y)]);
+    u64XorInplace(a[i], b[i]);
   }
 
   // ι step
-  u64Xor(a[0], a[0], rc);
+  u64XorInplace(a[0], rc);
 }
 
 /**
@@ -198,48 +213,48 @@ function keccakRoundOriginal(a, rc) { // eslint-disable-line no-unused-vars
  */
 function keccakRound(a, rc) {
   // θ step
-  u64Xor(c[0], a[0], a[5], a[10], a[15], a[20]);
-  u64Xor(c[1], a[1], a[6], a[11], a[16], a[21]);
-  u64Xor(c[2], a[2], a[7], a[12], a[17], a[22]);
-  u64Xor(c[3], a[3], a[8], a[13], a[18], a[23]);
-  u64Xor(c[4], a[4], a[9], a[14], a[19], a[24]);
+  u64XorMany(c[0], a[0], a[5], a[10], a[15], a[20]);
+  u64XorMany(c[1], a[1], a[6], a[11], a[16], a[21]);
+  u64XorMany(c[2], a[2], a[7], a[12], a[17], a[22]);
+  u64XorMany(c[3], a[3], a[8], a[13], a[18], a[23]);
+  u64XorMany(c[4], a[4], a[9], a[14], a[19], a[24]);
 
   u64Rotate(d[0], c[1], 1);
-  u64Xor(d[0], d[0], c[4]);
+  u64XorTwo(d[0], d[0], c[4]);
   u64Rotate(d[1], c[2], 1);
-  u64Xor(d[1], d[1], c[0]);
+  u64XorTwo(d[1], d[1], c[0]);
   u64Rotate(d[2], c[3], 1);
-  u64Xor(d[2], d[2], c[1]);
+  u64XorTwo(d[2], d[2], c[1]);
   u64Rotate(d[3], c[4], 1);
-  u64Xor(d[3], d[3], c[2]);
+  u64XorTwo(d[3], d[3], c[2]);
   u64Rotate(d[4], c[0], 1);
-  u64Xor(d[4], d[4], c[3]);
+  u64XorTwo(d[4], d[4], c[3]);
 
-  u64Xor(a[0], a[0], d[0]);
-  u64Xor(a[1], a[1], d[1]);
-  u64Xor(a[2], a[2], d[2]);
-  u64Xor(a[3], a[3], d[3]);
-  u64Xor(a[4], a[4], d[4]);
-  u64Xor(a[5], a[5], d[0]);
-  u64Xor(a[6], a[6], d[1]);
-  u64Xor(a[7], a[7], d[2]);
-  u64Xor(a[8], a[8], d[3]);
-  u64Xor(a[9], a[9], d[4]);
-  u64Xor(a[10], a[10], d[0]);
-  u64Xor(a[11], a[11], d[1]);
-  u64Xor(a[12], a[12], d[2]);
-  u64Xor(a[13], a[13], d[3]);
-  u64Xor(a[14], a[14], d[4]);
-  u64Xor(a[15], a[15], d[0]);
-  u64Xor(a[16], a[16], d[1]);
-  u64Xor(a[17], a[17], d[2]);
-  u64Xor(a[18], a[18], d[3]);
-  u64Xor(a[19], a[19], d[4]);
-  u64Xor(a[20], a[20], d[0]);
-  u64Xor(a[21], a[21], d[1]);
-  u64Xor(a[22], a[22], d[2]);
-  u64Xor(a[23], a[23], d[3]);
-  u64Xor(a[24], a[24], d[4]);
+  u64XorTwo(a[0], a[0], d[0]);
+  u64XorTwo(a[1], a[1], d[1]);
+  u64XorTwo(a[2], a[2], d[2]);
+  u64XorTwo(a[3], a[3], d[3]);
+  u64XorTwo(a[4], a[4], d[4]);
+  u64XorTwo(a[5], a[5], d[0]);
+  u64XorTwo(a[6], a[6], d[1]);
+  u64XorTwo(a[7], a[7], d[2]);
+  u64XorTwo(a[8], a[8], d[3]);
+  u64XorTwo(a[9], a[9], d[4]);
+  u64XorTwo(a[10], a[10], d[0]);
+  u64XorTwo(a[11], a[11], d[1]);
+  u64XorTwo(a[12], a[12], d[2]);
+  u64XorTwo(a[13], a[13], d[3]);
+  u64XorTwo(a[14], a[14], d[4]);
+  u64XorTwo(a[15], a[15], d[0]);
+  u64XorTwo(a[16], a[16], d[1]);
+  u64XorTwo(a[17], a[17], d[2]);
+  u64XorTwo(a[18], a[18], d[3]);
+  u64XorTwo(a[19], a[19], d[4]);
+  u64XorTwo(a[20], a[20], d[0]);
+  u64XorTwo(a[21], a[21], d[1]);
+  u64XorTwo(a[22], a[22], d[2]);
+  u64XorTwo(a[23], a[23], d[3]);
+  u64XorTwo(a[24], a[24], d[4]);
 
   // ρ and π steps
   u64Rotate(b[0], a[0], 0);
@@ -272,13 +287,13 @@ function keccakRound(a, rc) {
   // unrolling this hurts performance, idk why
   for (let i = 0; i < 25; i++) {
     let [x, y] = itoxy(i);
-    u64Xor(a[i], b[xytoi(x + 1, y)], SIXTY_FOUR_BIT);
-    u64And(a[i], a[i], b[xytoi(x + 2, y)]);
-    u64Xor(a[i], a[i], b[i]);
+    u64XorTwo(a[i], b[xytoi(x + 1, y)], SIXTY_FOUR_BIT);
+    u64AndInplace(a[i], b[xytoi(x + 2, y)]);
+    u64XorTwo(a[i], a[i], b[i]);
   }
 
   // ι step
-  u64Xor(a[0], a[0], rc);
+  u64XorTwo(a[0], a[0], rc);
 }
 
 /**
