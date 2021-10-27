@@ -1297,7 +1297,7 @@ registerExternalCommand('roll', async (args, event) => {
     count = Math.floor(count);
     sides = Math.floor(sides);
     if (count <= 0 || count > 100) return null;
-    if (sides <= 0 || sides > 1e9) return null;
+    if (sides <= 0 || sides > 1e15) return null;
     return [count, sides];
   }).filter(Boolean).slice(0, 25);
   let output = [];
