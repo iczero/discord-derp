@@ -86,7 +86,9 @@ function u64Rotate(output, n, r) {
 
   // if over 32, shift by 32 first then shift the rest
   if (r >= 32) {
-    [ib, ia] = [ia, ib];
+    let iaPrev = ia;
+    ia = ib;
+    ib = iaPrev;
     r -= 32;
   }
   let oa = ia;
