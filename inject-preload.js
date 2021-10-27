@@ -144,15 +144,18 @@ if (window.opener === null) {
       else return buf.toString(format);
     },
     float() {
-      let val = keccak.squeeze(KECCAK_BITRATE, 6).readUIntLE(0, 6);
-      return val / UINT48_MAX;
+      let buf = keccak.squeeze(KECCAK_BITRATE, 8);
+      buf[7] = 63;
+      buf[6] |= 0xf0;
+      return buf.readDoubleLE() - 1;
     },
     floatMany(n) {
       let out = [];
-      let buf = keccak.squeeze(KECCAK_BITRATE, n * 6);
-      for (let i = 0; i < buf.length; i += 6) {
-        let val = buf.readUIntLE(i, 6);
-        out.push(val / UINT48_MAX);
+      let buf = keccak.squeeze(KECCAK_BITRATE, n * 8);
+      for (let i = 0; i < buf.length; i += 8) {
+        buf[i + 7] = 63;
+        buf[i + 6] |= 0xf0;
+        out.push(buf.readDoubleLE(i) - 1);
       }
       return out;
     },
