@@ -1279,12 +1279,10 @@ registerExternalCommand('random', async (args, event) => {
     reply = inject.random.read(length, encoding);
   } else {
     let rawState = inject.random.readRaw();
-    if (short) reply = rawState[0].toString();
-    else {
-      reply = rawState.slice(0, 8)
-        .reduce((acc, val, idx) => acc | (val << BigInt(idx * 64)), 0n)
-        .toString();
-    }
+    if (short) rawState = rawState.slice(0, 2);
+    reply = rawState
+      .reduce((acc, val, idx) => acc | (BigInt(val) << BigInt(idx * 32)), 0n)
+      .toString();
   }
   await sendMessage(event.channel_id, { content: reply });
 });

@@ -157,7 +157,7 @@ if (window.opener === null) {
       return out;
     },
     readRaw() {
-      let out = keccak.state.slice(0, Math.floor(KECCAK_BITRATE / 64));
+      let out = keccak.state.slice(0, Math.floor(KECCAK_BITRATE / 64)).flat();
       keccak.keccakf();
       return out;
     }
