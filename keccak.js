@@ -286,9 +286,10 @@ function keccakRound(a, rc) {
   // χ step
   // unrolling this hurts performance, idk why
   for (let i = 0; i < 25; i++) {
-    let [x, y] = itoxy(i);
-    u64XorTwo(a[i], b[xytoi(x + 1, y)], SIXTY_FOUR_BIT);
-    u64AndInplace(a[i], b[xytoi(x + 2, y)]);
+    let x = i % 5;
+    let y = Math.floor(i / 5);
+    u64XorTwo(a[i], b[y * 5 + ((x + 1) % 5)], SIXTY_FOUR_BIT);
+    u64AndInplace(a[i], b[y * 5 + ((x + 2) % 5)]);
     u64XorTwo(a[i], a[i], b[i]);
   }
 
