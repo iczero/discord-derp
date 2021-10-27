@@ -210,12 +210,7 @@ class KeccakWritable extends stream.Writable {
         this._buffer = [chunk.slice(chunk.length - excess)];
         this.bufferLength = excess;
       }
-      for (let i = 0; i < writeBuf.length; i += this.byterate) {
-        for (let j = 0; j < this.bitrate / 64; j++) {
-          this.instance.state[j] ^= writeBuf.readBigUInt64LE(i + j * 8);
-        }
-        this.instance.keccakf();
-      }
+      this.instance.absorbRaw(this.bitrate, writeBuf);
     }
     callback(null);
   }
@@ -253,9 +248,19 @@ class Keccak {
    */
   absorb(r, bytes, bits = 0, bitLength = 0) {
     let padded = pad(r, bytes, bits, bitLength);
-    for (let i = 0; i < padded.length; i += r / 8) {
+    this.absorbRaw(r, padded);
+  }
+
+  /**
+   * Feed bytes to the sponge function without padding
+   * Input buffer length must be a multiple of r / 8
+   * @param {number} r Keccak r value ("bitrate")
+   * @param {Buffer} bytes Buffer of data
+   */
+  absorbRaw(r, bytes) {
+    for (let i = 0; i < bytes.length; i += r / 8) {
       for (let j = 0; j < r / 64; j++) {
-        this.state[j] ^= padded.readBigUInt64LE(i + j * 8);
+        this.state[j] ^= bytes.readBigUInt64LE(i + j * 8);
       }
       this.keccakf();
     }

@@ -99,14 +99,13 @@ if (window.opener === null) {
 
   async function randomStuff() {
     let time1 = process.hrtime()[1];
-    // -1 needed or padding will stick another block at the end
-    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8 - 1);
+    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8);
     let writeBuf = keccak.squeeze(KECCAK_BITRATE, KECCAK_BITRATE / 8);
     await Promise.all([
       randomFd.read(readBuf, 0, readBuf.length, null),
       randomFd.write(writeBuf)
     ]);
-    keccak.absorb(KECCAK_BITRATE, readBuf);
+    keccak.absorbRaw(KECCAK_BITRATE, readBuf);
     let timeBuf = keccak.squeeze(KECCAK_BITRATE, 2);
     let time = timeBuf.readUInt16BE();
     let time2 = process.hrtime()[1];

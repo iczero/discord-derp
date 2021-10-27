@@ -201,6 +201,25 @@ let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
 
 /**
+ * Pretty-print channel by id
+ * @param {string} id channel id
+ * @return {string}
+ */
+function formatChannel(id) {
+  let channel = channelRegistry.getChannel(id);
+  if (channel) {
+    let guild = guildRegistry.getGuild(channel.guild_id);
+    if (guild) {
+      return `${guild.name}/#${channel.name} (${id})`;
+    } else {
+      return `<unknown guild ${channel.guild_id}>/#${channel.name} (${id})`;
+    }
+  } else {
+    return `<unknown channel ${id}>`;
+  }
+}
+
+/**
  * Send a message to a channel, without slowmode handling
  * @param {string} channel Channel id
  * @param {object} body Message body
@@ -249,7 +268,7 @@ function sendMessageDirect(channel, body) {
     }, result => {
       if (!result.ok) {
         messageActions.sendBotMessage(currentChannel,
-          `**Warning**: send message to channel ${message.channelId} failed` +
+          `**Warning**: send message to channel ${formatChannel(message.channelId)} failed` +
           '```json\n// sent message\n' + JSON.stringify(body, null, 2) + '\n```' +
           '```json\n// server response\n' + JSON.stringify(result, null, 2) + '\n```'
         );
