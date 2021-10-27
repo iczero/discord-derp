@@ -14,7 +14,7 @@ const RC = Object.freeze([
   [0x80000000, 0x00008003], [0x80000000, 0x00008002], [0x80000000, 0x00000080],
   [0x00000000, 0x0000800A], [0x80000000, 0x8000000A], [0x80000000, 0x80008081],
   [0x80000000, 0x00008080], [0x00000000, 0x80000001], [0x80000000, 0x80008008]
-]);
+].map(a => new Uint32Array(a)));
 
 /** Rotation offsets */
 const R = Object.freeze([
@@ -67,12 +67,12 @@ function itoxy(i) {
 }
 
 // [most significant, least significant]
-/** @typedef {[number, number]} U64Pair */
+/** @typedef {Uint32Array} U64Pair */
 /**
  * It is as it is named
  * @type {U64Pair}
  */
-const SIXTY_FOUR_BIT = [0xFFFFFFFF, 0xFFFFFFFF];
+const SIXTY_FOUR_BIT = new Uint32Array([0xFFFFFFFF, 0xFFFFFFFF]);
 
 /**
  * Unsigned 64-bit integer (as two unsigned 32-bit integers) rotate left
@@ -163,11 +163,11 @@ function keccakf(a, rounds = 24) {
 
 // temporary arrays for keccakf rounds
 /** @type {U64Pair[]} */
-let b = new Array(25).fill(null).map(() => [0, 0]);
+let b = new Array(25).fill(null).map(() => new Uint32Array(2));
 /** @type {U64Pair[]} */
-let c = new Array(5).fill(null).map(() => [0, 0]);
+let c = new Array(5).fill(null).map(() => new Uint32Array(2));
 /** @type {U64Pair[]} */
-let d = new Array(5).fill(null).map(() => [0, 0]);
+let d = new Array(5).fill(null).map(() => new Uint32Array(2));
 
 /**
  * Keccak round function without loop unrolling
@@ -396,7 +396,7 @@ class KeccakWritable extends stream.Writable {
 class Keccak {
   constructor(rounds = 24) {
     /** @type {U64Pair[]} */
-    this.state = new Array(25).fill(null).map(() => [0, 0]);
+    this.state = new Array(25).fill(null).map(() => new Uint32Array(2));
     this.rounds = rounds;
   }
 
@@ -466,7 +466,7 @@ class Keccak {
 
   /** Clear internal state */
   clear() {
-    this.state = this.state.map(() => [0, 0]);
+    this.state = this.state.map(() => new Uint32Array(2));
   }
 }
 
