@@ -1297,7 +1297,7 @@ registerExternalCommand('roll', async (args, event) => {
     count = Math.floor(count);
     sides = Math.floor(sides);
     if (count <= 0 || count > 100) return null;
-    if (sides <= 0 || sides > 1e15) return null;
+    if (sides < 0 || sides > 1e15) return null;
     return [count, sides];
   }).filter(Boolean).slice(0, 25);
   let output = [];
@@ -1309,7 +1309,12 @@ registerExternalCommand('roll', async (args, event) => {
     let results = [];
     let lineLength = lineHeader.length;
     for (let pick of source) {
-      let result = Math.floor(pick * sides) + 1;
+      let result;
+      if (sides !== 0) {
+        result = Math.floor(pick * sides) + 1;
+      } else {
+        result = [Infinity, NaN, -Infinity][Math.floor(pick * 3)];
+      }
       let resultString = result.toString();
       let newTotalLength = outputLength + lineLength + resultString.length +
         (output.length ? 1 : 0) + (results.length ? 1 : 0);

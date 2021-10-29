@@ -160,9 +160,9 @@ if (window.opener === null) {
       return out;
     },
     readRaw() {
-      let out = keccak.state.slice(0, Math.floor(KECCAK_BITRATE / 64)).flat();
+      let view = new Uint32Array(keccak._buffer, 0, KECCAK_BITRATE / 32);
       keccak.keccakf();
-      return out;
+      return view.slice();
     }
   };
 }

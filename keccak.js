@@ -270,7 +270,9 @@ class Keccak {
    *   (SHA-3 uses 24, KangarooTwelve uses 12)
    */
   keccakf(rounds = this.rounds) {
-    for (let i = 0; i < rounds; i++) this.keccakRound(RC[i]);
+    // keccak-p reduced round uses last n round constants
+    let offset = RC.length - rounds;
+    for (let i = 0; i < rounds; i++) this.keccakRound(RC[offset + i]);
   }
 
   /**
