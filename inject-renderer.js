@@ -1279,7 +1279,7 @@ registerExternalCommand('random', async (args, event) => {
     reply = inject.random.read(length, encoding);
   } else {
     let rawState = inject.random.readRaw();
-    if (short) rawState = rawState.slice(0, 2);
+    if (short) rawState = rawState.subarray(0, 2);
     reply = rawState
       .reduce((acc, val, idx) => acc | (BigInt(val) << BigInt(idx * 32)), 0n)
       .toString();

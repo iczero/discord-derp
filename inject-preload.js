@@ -95,7 +95,6 @@ if (window.opener === null) {
   let keccak = new Keccak(12);
   let keccakStream = keccak.absorbStream(KECCAK_BITRATE);
   let randomFd = null;
-  let randomTimer = null;
 
   async function randomStuff() {
     let time1 = process.hrtime()[1];
@@ -125,12 +124,11 @@ if (window.opener === null) {
       log('random: seeded from /dev/urandom');
     } catch (err) {
       // seed with crypto.randomBytes instead
-      keccak.absorb(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2 - 1));
+      keccak.absorbRaw(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2));
       log('random: seeded from crypto.randomBytes');
     }
   })();
 
-  const UINT48_MAX = 2 ** 48;
   injectExports.random = {
     write(s) {
       let writeTimeBuf = Buffer.alloc(4);
@@ -144,6 +142,8 @@ if (window.opener === null) {
       else return buf.toString(format);
     },
     float() {
+      // ugly float hacking
+      // set sign and exponent to generate values in [1.0, 2.0)
       let buf = keccak.squeeze(KECCAK_BITRATE, 8);
       buf[7] = 63;
       buf[6] |= 0xf0;
