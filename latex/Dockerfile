@@ -12,7 +12,7 @@ RUN ./install-tl -profile texlive.profile
 RUN rm -rf /root/texlive-install
 
 RUN tlmgr update --self
-RUN tlmgr install xkeyval simplekv standalone preview microtype varwidth chemfig
+RUN tlmgr install xkeyval simplekv standalone preview microtype varwidth chemfig etoolbox
 RUN tlmgr path add
 
 VOLUME /data
