@@ -2,7 +2,7 @@ FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt update
-RUN apt upgrade -y wget perl ghostscript
+RUN apt upgrade -y wget perl ghostscript gnupg
 
 WORKDIR /root/texlive-install
 RUN wget http://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz
