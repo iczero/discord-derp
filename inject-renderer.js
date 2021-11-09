@@ -198,7 +198,9 @@ function jumpToChannel(id) {
 }
 
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-let generateNonce = () => Math.floor(Math.random() * 1e16).toString();
+let generateNonce = () => Math.floor(inject.random.float() * 1e16).toString();
+// must use keccak
+Math.random = inject.random.float;
 
 /**
  * Pretty-print channel by id
