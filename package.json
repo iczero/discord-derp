@@ -6,8 +6,12 @@
   "dependencies": {
     "wolframalpha-websocket-api": "github:iczero/wolframalpha-websocket-api"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@types/node": "^16.11.7",
+    "typescript": "^4.4.4"
+  },
   "scripts": {
+    "build": "tsc -p .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
