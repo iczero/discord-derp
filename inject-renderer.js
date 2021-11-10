@@ -1432,7 +1432,7 @@ function splitCommandMessage(content) {
   return args;
 }
 
-const RANDOM_SYNC_CHANNEL = '354791708275507200';
+const RANDOM_SYNC_CHANNEL = inject.config.randomSyncChannel;
 
 gatewayEvents.on('MESSAGE_CREATE', async event => {
   if (!enableCommands) return;

@@ -13,6 +13,8 @@ messageMaxLength = 2000
 # max allowed embed length
 # should be same as messageMaxLength
 embedMaxLength = 2000
+# channel to listen for !do-random-sync entropy exchange
+randomSyncChannel = '354791708275507200'
 
 # override chrome data path (for example if using vivaldi)
 #chromeDataPath = ""

@@ -17,7 +17,8 @@ const DEFAULT_CONFIG = {
   prefix: '=',
   allowedGuilds: [],
   messageMaxLength: 2000,
-  embedMaxLength: 2000
+  embedMaxLength: 2000,
+  randomSyncChannel: null
 };
 
 let config = null;
