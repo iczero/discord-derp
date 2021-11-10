@@ -1411,10 +1411,24 @@ registerExternalCommand('preloadeval', async (args, event) => {
 });
 */
 let feedRandom = (...obj) => inject.random.write(JSON.stringify(obj).slice(1, -1));
-gatewayEvents.on('MESSAGE_CREATE', ev => feedRandom(ev.channel_id, ev.author?.id, ev.content));
+gatewayEvents.on('MESSAGE_CREATE', ev => {
+  if (ev.application_id) {
+    return feedRandom(ev.channel_id, ev.author?.id, ev.application_id, ev.id, ev.content);
+  }
+  return feedRandom(ev.channel_id, ev.author?.id, ev.id, ev.content);
+});
 gatewayEvents.on('MESSAGE_UPDATE', ev => feedRandom(ev.channel_id, ev.author?.id, ev.id, ev.content));
+gatewayEvents.on('MESSAGE_DELETE', ev => feedRandom(ev.channel_id, ev.id));
 gatewayEvents.on('MESSAGE_REACTION_ADD', ev => feedRandom(ev.user_id, ev.channel_id, ev.message_id, ev.emoji?.name, ev.emoji?.id));
 gatewayEvents.on('MESSAGE_REACTION_REMOVE', ev => feedRandom(ev.user_id, ev.channel_id, ev.message_id, ev.emoji?.name, ev.emoji?.id));
+gatewayEvents.on('VOICE_STATE_UPDATE', ev => feedRandom(ev.user_id, ev.channel_id, ev.session_id, ev.self_deaf, ev.self_mute, ev.self_video));
+gatewayEvents.on('CHANNEL_UPDATE', ev => {
+  if (ev.parent_id) {
+    return feedRandom(ev.id, ev.name, ev.parent_id, ev.last_message_id);
+  }
+  return feedRandom(ev.id, ev.name, ev.last_message_id);
+});
+gatewayEvents.on('PRESENCE_UPDATE', ev => feedRandom(ev.user?.id, ev.last_modified, ev.status));
 
 async function runCommand(args, event) {
   log('command:', args[0], event);

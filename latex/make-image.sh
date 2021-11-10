@@ -2,14 +2,14 @@
 set -x
 
 basedir=$(dirname $(readlink -f "${BASH_SOURCE[0]}"))
-cd $basedir
+cd "$basedir"
 
-tmpdir=$(mktemp -d jobs/XXXXXXXXXX)
+tmpdir=$(mktemp -d "$basedir/jobs/XXXXXXXXXX")
 if [[ "$tmpdir" == "" ]]; then
   exit 2
 fi
 cat tex.head - tex.tail > "$tmpdir/input.tex"
-podman run --rm -v "./$tmpdir:/data" latexbuild:1.0 >&2
+podman run --rm -v "$tmpdir:/data" latexbuild:1.0 >&2
 compilestatus=$?
 echo "exit status: $compilestatus" >&2
 exitstatus=0
