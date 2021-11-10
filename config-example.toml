@@ -1,0 +1,18 @@
+# example config file
+# copy this to config.toml
+
+# whether commands should be enabled
+enableCommands = false
+# if commands are enabled, command prefix
+prefix = '='
+# guilds where commands are allowed
+allowedGuilds = ['271781178296500235']
+# max allowed message length
+# if not nitro, 2000, else 4000
+messageMaxLength = 2000
+# max allowed embed length
+# should be same as messageMaxLength
+embedMaxLength = 2000
+
+# override chrome data path (for example if using vivaldi)
+#chromeDataPath = ""

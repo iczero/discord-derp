@@ -2,6 +2,7 @@ const electron = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsP = fs.promises;
+const toml = require('@iarna/toml');
 
 // replace index.js in modules/discord_desktop_core with
 // module.exports = require('/absolute/path/to/inject.js');
@@ -69,20 +70,27 @@ Object.defineProperty(electronModule, 'exports', {
 const REACT_DEVTOOLS_EXTENSION_ID = 'fmkadmapgofadopljbjfkapdkoienihi';
 (async () => {
   // electron app ready event seems to already have fired
+  // grab chromeDataPath from config
+  let configFile = (await fsP.readFile(path.join(__dirname, 'config.toml'))).toString();
+  let config = toml.parse(configFile);
   let chromeDataPath;
-  switch (process.platform) {
-    case 'linux':
-      chromeDataPath = path.resolve(process.env.HOME, '.config/google-chrome');
-      break;
-    case 'win32':
-      chromeDataPath = path.resolve(process.env.LOCALAPPDATA, 'Google/Chrome/User Data');
-      break;
-    case 'darwin':
-      chromeDataPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome');
-      break;
-    default:
-      log('unknown platform, not loading react devtools');
-      return;
+  if (config.chromeDataPath) {
+    chromeDataPath = config.chromeDataPath;
+  } else {
+    switch (process.platform) {
+      case 'linux':
+        chromeDataPath = path.resolve(process.env.HOME, '.config/google-chrome');
+        break;
+      case 'win32':
+        chromeDataPath = path.resolve(process.env.LOCALAPPDATA, 'Google/Chrome/User Data');
+        break;
+      case 'darwin':
+        chromeDataPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome');
+        break;
+      default:
+        log('unknown platform, not loading react devtools');
+        return;
+    }
   }
 
   let extensionDir = path.join(chromeDataPath, 'Default/Extensions', REACT_DEVTOOLS_EXTENSION_ID);

@@ -3,10 +3,29 @@ const path = require('path');
 const fsP = require('fs').promises;
 const childProcess = require('child_process');
 const EventEmitter = require('events');
+const toml = require('@iarna/toml');
 // const util = require('util');
 const { Keccak, KeccakRand } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
+
+let injectExports = Object.create(null);
+
+// load configuration
+const DEFAULT_CONFIG = {
+  enableCommands: false,
+  prefix: '=',
+  allowedGuilds: [],
+  messageMaxLength: 2000,
+  embedMaxLength: 2000
+};
+
+let config = null;
+let configWait = (async () => {
+  let configFile = (await fsP.readFile(path.join(__dirname, 'config.toml'))).toString();
+  config = Object.assign({}, DEFAULT_CONFIG, toml.parse(configFile));
+  injectExports.config = config;
+})();
 
 // load the renderer script early
 let injectRenderer = fsP.readFile(path.join(__dirname, 'inject-renderer.js'))
@@ -41,7 +60,6 @@ discordNativeWindow.setDevtoolsCallbacks = () => {
 log('loading DiscordNative');
 require(path.join(CORE_MODULE_PATH, 'core.asar/app/mainScreenPreload.js'));
 
-let injectExports = Object.create(null);
 // ipc is probably safe to export
 injectExports.ipc = electron.ipcRenderer;
 injectExports.console = console;
@@ -50,6 +68,10 @@ if (window.opener === null) {
   // we are in main window
   window.addEventListener('DOMContentLoaded', async () => {
     log('content loaded, injecting renderer script');
+    // wait for config to load before inject
+    await configWait;
+    // expose exports to renderer
+    electron.contextBridge.exposeInMainWorld('inject', injectExports);
     // since contextIsolation is enabled, it is not possible to directly interact
     // with the frame. another script is loaded here for that purpose
     electron.webFrame.executeJavaScript(await injectRenderer);
@@ -184,5 +206,3 @@ if (window.opener === null) {
   injectExports.evalInPreload = stuff => eval(stuff);
 }
 */
-
-electron.contextBridge.exposeInMainWorld('inject', injectExports);

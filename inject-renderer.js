@@ -735,12 +735,12 @@ function uuid() {
 }
 
 // stupid commands
-let enableCommands = true;
-const PREFIX = '=';
-const ALLOWED_GUILDS = new Set(['271781178296500235', '635261572247322639', '645755975889977354', '377970285552599040']);
+let enableCommands = inject.config.enableCommands;
+const PREFIX = inject.config.prefix;
+const ALLOWED_GUILDS = new Set(inject.config.allowedGuilds);
 const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override', 'ordel']);
-const MESSAGE_MAX_LENGTH = 2000;
-const EMBED_MAX_LENGTH = 2000;
+const MESSAGE_MAX_LENGTH = inject.config.messageMaxLength;
+const EMBED_MAX_LENGTH = inject.config.embedMaxLength;
 const EMBED_MAX_FIELDS = 25;
 const EMBED_FIELD_NAME_MAX_LENGTH = 256;
 const EMBED_FIELD_VALUE_MAX_LENGTH = 1024;

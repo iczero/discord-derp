@@ -4,6 +4,7 @@
   "description": "random discord crap",
   "main": "inject.js",
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "wolframalpha-websocket-api": "github:iczero/wolframalpha-websocket-api"
   },
   "devDependencies": {

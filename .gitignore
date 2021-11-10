@@ -2,3 +2,4 @@
 /local/
 
 node_modules/
+/config.toml
