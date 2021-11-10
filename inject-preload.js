@@ -4,7 +4,7 @@ const fsP = require('fs').promises;
 const childProcess = require('child_process');
 const EventEmitter = require('events');
 // const util = require('util');
-const { Keccak } = require('./keccak');
+const { Keccak, KeccakRand } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
 
@@ -93,25 +93,25 @@ if (window.opener === null) {
   const KECCAK_BITRATE = 512;
   // use 12-round keccak
   let keccak = new Keccak(12);
-  let keccakStream = keccak.absorbStream(KECCAK_BITRATE);
+  let keccakRand = new KeccakRand(keccak, KECCAK_BITRATE);
   let randomFd = null;
 
   async function randomStuff() {
     let time1 = process.hrtime()[1];
-    let readBuf = Buffer.allocUnsafe(KECCAK_BITRATE / 8);
-    let writeBuf = keccak.squeeze(KECCAK_BITRATE, KECCAK_BITRATE / 8);
+    let readBuf = Buffer.allocUnsafe(keccakRand.byterate);
+    let writeBuf = keccakRand.bytesDirect(keccakRand.byterate);
     await Promise.all([
       randomFd.read(readBuf, 0, readBuf.length, null),
       randomFd.write(writeBuf)
     ]);
-    keccak.absorbRaw(KECCAK_BITRATE, readBuf);
-    let timeBuf = keccak.squeeze(KECCAK_BITRATE, 2);
+    keccakRand.seedDirect(readBuf);
+    let timeBuf = keccakRand.bytes(2);
     let time = timeBuf.readUInt16BE();
     let time2 = process.hrtime()[1];
     if (time2 < time1) time2 += 1e9;
     let writeTimeBuf = Buffer.alloc(4);
     writeTimeBuf.writeUInt32LE(time2 - time1);
-    keccakStream.write(writeTimeBuf);
+    keccakRand.write(writeTimeBuf);
     randomTimer = setTimeout(randomStuff, time * 10);
     log('random: periodic resync, tdelta', time2 - time1, 'scheduled', time * 10);
   }
@@ -124,7 +124,7 @@ if (window.opener === null) {
       log('random: seeded from /dev/urandom');
     } catch (err) {
       // seed with crypto.randomBytes instead
-      keccak.absorbRaw(KECCAK_BITRATE, require('crypto').randomBytes(KECCAK_BITRATE / 8 * 2));
+      keccakRand.seedDirect(require('crypto').randomBytes(keccakRand.byterate * 16));
       log('random: seeded from crypto.randomBytes');
     }
   })();
@@ -133,37 +133,19 @@ if (window.opener === null) {
     write(s) {
       let writeTimeBuf = Buffer.alloc(4);
       writeTimeBuf.writeUInt32LE(process.hrtime()[1]);
-      keccakStream.write(writeTimeBuf);
-      keccakStream.write(s);
+      keccakRand.write(writeTimeBuf);
+      keccakRand.write(s);
     },
     read(n, format = null) {
-      let buf = keccak.squeeze(KECCAK_BITRATE, n);
+      let buf = keccakRand.bytes(n);
       if (!format) return new Uint8Array(buf);
       else return buf.toString(format);
     },
-    float() {
-      // ugly float hacking
-      // set sign and exponent to generate values in [1.0, 2.0)
-      let buf = keccak.squeeze(KECCAK_BITRATE, 8);
-      buf[7] = 63;
-      buf[6] |= 0xf0;
-      return buf.readDoubleLE() - 1;
-    },
-    floatMany(n) {
-      let out = [];
-      let buf = keccak.squeeze(KECCAK_BITRATE, n * 8);
-      for (let i = 0; i < buf.length; i += 8) {
-        buf[i + 7] = 63;
-        buf[i + 6] |= 0xf0;
-        out.push(buf.readDoubleLE(i) - 1);
-      }
-      return out;
-    },
-    readRaw() {
-      let view = new Uint32Array(keccak._buffer, 0, KECCAK_BITRATE / 32);
-      keccak.keccakf();
-      return view.slice();
-    }
+    float: keccakRand.float.bind(keccakRand),
+    floatMany: keccakRand.floatMany.bind(keccakRand),
+    int: keccakRand.int.bind(keccakRand),
+    intMany: keccakRand.intMany.bind(keccakRand),
+    readRaw: keccakRand.bunchOfUint32Arrays.bind(keccakRand)
   };
 }
 

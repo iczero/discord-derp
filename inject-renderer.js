@@ -198,7 +198,7 @@ function jumpToChannel(id) {
 }
 
 let sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-let generateNonce = () => Math.floor(inject.random.float() * 1e16).toString();
+let generateNonce = () => inject.random.int(1e15).toString();
 // must use keccak
 Math.random = inject.random.float;
 
@@ -1307,15 +1307,15 @@ registerExternalCommand('roll', async (args, event) => {
   mainLoop: for (let [count, sides] of dice) {
     let lineHeader = `**${count}d${sides}:** `;
     if (outputLength + lineHeader.length >= MESSAGE_MAX_LENGTH) break;
-    let source = inject.random.floatMany(count);
+    let source = inject.random.intMany(count, sides === 0 ? 3 : sides);
     let results = [];
     let lineLength = lineHeader.length;
     for (let pick of source) {
       let result;
       if (sides !== 0) {
-        result = Math.floor(pick * sides) + 1;
+        result = pick + 1;
       } else {
-        result = [Infinity, NaN, -Infinity][Math.floor(pick * 3)];
+        result = [Infinity, NaN, -Infinity][pick];
       }
       let resultString = result.toString();
       let newTotalLength = outputLength + lineLength + resultString.length +
