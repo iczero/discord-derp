@@ -56,7 +56,7 @@ const resolvedModules = resolveModules({
   guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
   guildChannels: m => m.default && typeof m.default.getChannels === 'function' && m.GUILD_SELECTABLE_CHANNELS_KEY,
   guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
-  emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStore',
+  emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStoreV2',
   permissions: m => m.default && typeof m.default.getChannelPermissions === 'function',
   events: m => typeof m.EventEmitter === 'function',
   reactDOM: m => m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED && typeof m.render === 'function' && typeof m.hydrate === 'function',
