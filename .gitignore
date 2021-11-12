@@ -1,5 +1,6 @@
 # local stuff
 /local/
 
-node_modules/
+node_modules
 /config.toml
+.adblocker.cache

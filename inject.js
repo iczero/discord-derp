@@ -1,8 +1,10 @@
 const electron = require('electron');
 const path = require('path');
+const fetch = require('cross-fetch');
 const fs = require('fs');
 const fsP = fs.promises;
 const toml = require('@iarna/toml');
+const { ElectronBlocker } = require('@cliqz/adblocker-electron');
 
 // replace index.js in modules/discord_desktop_core with
 // module.exports = require('/absolute/path/to/inject.js');
@@ -44,6 +46,20 @@ Object.defineProperty(electronModule, 'exports', {
           log('created window does not match title', MAIN_WINDOW_TITLE);
         }
         super(opts);
+        // install adblocker
+        (async () => {
+          const blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+            path: path.join(__dirname, '.adblocker.cache'),
+            read: fsP.readFile,
+            write: fsP.writeFile
+          });
+          blocker.enableBlockingInSession(this.webContents.session);
+          log('installed adblocker on window', opts.title);
+
+          blocker.on('request-blocked', (request) => {
+            log('blocked', request.url, 'on window', opts.title);
+          });
+        })();
         if (isMainWindow) {
           // store the main window for later
           mainWindow = this;
@@ -57,6 +73,7 @@ Object.defineProperty(electronModule, 'exports', {
               return;
             }
             console.error('inject: main window crashed!');
+            console.error(_event);
           });
         }
       }
@@ -66,8 +83,11 @@ Object.defineProperty(electronModule, 'exports', {
   }
 });
 
-// try to load react devtools
-const REACT_DEVTOOLS_EXTENSION_ID = 'fmkadmapgofadopljbjfkapdkoienihi';
+// try to load extensions
+const EXTENSION_IDS = [
+  'fmkadmapgofadopljbjfkapdkoienihi', // React DevTools
+  //'cjpalhdlnbpafiamejdnhcphjbkeiagm' // uBlock Origin (does not seem to work)
+];
 (async () => {
   // electron app ready event seems to already have fired
   // grab chromeDataPath from config
@@ -88,28 +108,30 @@ const REACT_DEVTOOLS_EXTENSION_ID = 'fmkadmapgofadopljbjfkapdkoienihi';
         chromeDataPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome');
         break;
       default:
-        log('unknown platform, not loading react devtools');
+        log('unknown platform, not loading extensions');
         return;
     }
   }
 
-  let extensionDir = path.join(chromeDataPath, 'Default/Extensions', REACT_DEVTOOLS_EXTENSION_ID);
-  let versions;
-  try {
-    versions = await fsP.readdir(extensionDir);
-  } catch (err) { /* handled later */ }
-  if (!versions || !versions.length) {
-    log('could not find react devtools in default profile');
-    return;
-  }
+  for (const EXTENSION_ID of EXTENSION_IDS) {
+    let extensionDir = path.join(chromeDataPath, 'Default/Extensions', EXTENSION_ID);
+    let versions;
+    try {
+      versions = await fsP.readdir(extensionDir);
+    } catch (err) { /* handled later */ }
+    if (!versions || !versions.length) {
+      log(`could not find extension ${EXTENSION_ID} in default profile`);
+      return;
+    }
 
-  let version = versions[versions.length - 1];
-  let extensionPath = path.join(extensionDir, version);
-  try {
-    await electron.session.defaultSession.loadExtension(extensionPath);
-    log('loaded react devtools, version', version);
-  } catch (err) {
-    log('failed to load react devtools: ', err);
+    let version = versions[versions.length - 1];
+    let extensionPath = path.join(extensionDir, version);
+    try {
+      const ext = await electron.session.defaultSession.loadExtension(extensionPath);
+      log('loaded extension', ext.name, 'version', ext.version);
+    } catch (err) {
+      log(`failed to load extension ${EXTENSION_ID}: `, err);
+    }
   }
 })();
 
