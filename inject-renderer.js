@@ -24,6 +24,7 @@ function resolveModules(def) {
   for (let name of Object.keys(def)) needed.add(name);
   moduleLoop: for (let [i, selectedModule] of Object.entries(modulesList)) {
     for (let name of needed) {
+      if (typeof selectedModule.exports === 'undefined') continue;
       if (def[name](selectedModule.exports)) {
         log(`found module ${name} at ${i}`);
         found[name] = selectedModule.exports;
@@ -68,8 +69,8 @@ const resolvedModules = resolveModules({
   rtcConnection: m => typeof m.default === 'function' && typeof m.default.create === 'function',
   experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
   slowmode: m => m.default && typeof m.SlowmodeType === 'object',
-  stickers: m => m && m.default && typeof m.default.getStickerById === 'function',
-  guildAvatars: m => m && m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function'
+  stickers: m => m.default && typeof m.default.getStickerById === 'function',
+  guildAvatars: m => m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -109,12 +110,12 @@ let ApplicationCommandOptionType = null;
 function lateResolveModules() {
   log('resolving late modules');
   Object.assign(resolvedModules, resolveModules({
-    messageHooks: m => m && typeof m.useClickMessage === 'function',
-    replyHandler: m => m && typeof m.createPendingReply === 'function',
+    messageHooks: m => typeof m.useClickMessage === 'function',
+    replyHandler: m => typeof m.createPendingReply === 'function',
     // this has got to be the hackiest one yet
-    setUnreadPosition: m => m && typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
-    commands: m => m && typeof m.getBuiltInCommands === 'function',
-    commandTypes: m => m && typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
+    setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
+    commands: m => typeof m.getBuiltInCommands === 'function',
+    commandTypes: m => typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
   }));
 
   messageHooks = resolvedModules.messageHooks;
