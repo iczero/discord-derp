@@ -170,21 +170,30 @@ if (window.opener === null) {
     intMany: keccakRand.intMany.bind(keccakRand),
     readRaw: keccakRand.bunchOfUint32Arrays.bind(keccakRand)
   };
+
+  // must use keccak
+  Math.random = keccakRand.float.bind(keccakRand);
 }
 
 {
   /**
-   * Align protein sequences with clustalo
+   * Align sequences with mafft
    * Because why not
    * @param {string} input Alignment input
    * @returns {string}
    */
-  async function clustalo(input) {
+  async function mafft(input) {
+    /*
     let proc = childProcess.spawn('clustalo',
       ['-i', '-', '--outfmt=clustal', '--resno'],
       {
         stdio: ['pipe', 'pipe', 'pipe']
       }
+    );
+    */
+    let proc = childProcess.spawn('mafft',
+      ['--clustalout', '--auto', '--quiet', '-'],
+      { stdio: ['pipe', 'pipe', 'pipe'] }
     );
     proc.stdin.write(input);
     let outputBuffers = [];
@@ -196,7 +205,7 @@ if (window.opener === null) {
     return Buffer.concat(outputBuffers).toString();
   }
   injectExports.align = {
-    clustalo
+    mafft
   };
 }
 

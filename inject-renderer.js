@@ -106,6 +106,8 @@ let setUnreadPosition = null;
 let commands = null;
 let ApplicationCommandType = null;
 let ApplicationCommandOptionType = null;
+let uploader = null;
+let MultiUploader = null
 
 function lateResolveModules() {
   log('resolving late modules');
@@ -115,7 +117,9 @@ function lateResolveModules() {
     // this has got to be the hackiest one yet
     setUnreadPosition: m => typeof m.default === 'function' && m.default.length === 2 && m.default.toString().match(/\.Endpoints\.MESSAGE_ACK\(/),
     commands: m => typeof m.getBuiltInCommands === 'function',
-    commandTypes: m => typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object'
+    commandTypes: m => typeof m.ApplicationCommandType === 'object' && typeof m.ApplicationCommandOptionType === 'object',
+    uploader: m => m.default?.uploadFiles && m.default?.cancel,
+    multiUploader: m => typeof m.default === 'function' && typeof m.MultiUploader === 'function'
   }));
 
   messageHooks = resolvedModules.messageHooks;
@@ -123,6 +127,8 @@ function lateResolveModules() {
   setUnreadPosition = resolvedModules.setUnreadPosition.default;
   commands = resolvedModules.commands;
   ({ ApplicationCommandType, ApplicationCommandOptionType } = resolvedModules.commandTypes);
+  uploader = resolvedModules.uploader.default;
+  MultiUploader = resolvedModules.multiUploader.MultiUploader;
 
   // monkey-patch messageHooks.useClickMessage
   // let oldUseClickMessage = messageHooks.useClickMessage;
@@ -916,12 +922,30 @@ registerExternalCommand('wa', async (args, event) => {
   sent = await sendMessage(event.channel_id, { embed });
   let messageId = sent.body.id;
 
-  let response = await promise;
-  log('wolframalpha response:', response);
+  let response = null;
+  let responseError = null;
+  try {
+    response = await promise;
+    log('wolframalpha response:', response);
+  } catch (err) {
+    responseError = err;
+    log('wolframalpha query error:', err);
+  }
 
   let baseMessageLength = embed.author.name.length + username.length;
   process: {
     embed.title = null;
+
+    if (responseError) {
+      embed.title = 'Request error';
+      baseMessageLength += embed.title.length;
+      embed.description = '```\n' + truncateLinesArray(
+        responseError.stack.split('\n'), EMBED_MAX_LENGTH - baseMessageLength - 8
+      ) + '\n```';
+      embed.color = 0xff0000;
+      break process;
+    }
+  
     if (response.failed) {
       embed.color = 0xff0000;
       embed.description = '**No results**';
@@ -1248,9 +1272,9 @@ registerExternalCommand('align', async (args, event) => {
   let mode = fullArgs.slice(0, separator);
   let input = parseCodeblocks(fullArgs.slice(separator + 1), []);
   let result;
-  // TODO: align nucleotide
-  if (mode === 'protein') {
-    result = await inject.align.clustalo(input);
+  // TODO: make less bad
+  if (mode === 'protein' || mode === 'nucleotide') {
+    result = await inject.align.mafft(input);
   } else {
     await sendMessage(event.channel_id, { content: 'unknown mode' });
     return;
