@@ -5,6 +5,9 @@ const childProcess = require('child_process');
 const EventEmitter = require('events');
 const toml = require('@iarna/toml');
 // const util = require('util');
+// SOON
+const ffi = require('ffi-napi');
+const ref = require('ref-napi');
 const { Keccak, KeccakRand } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
@@ -207,6 +210,11 @@ if (window.opener === null) {
   injectExports.align = {
     mafft
   };
+}
+
+{
+  const yargsParser = require('yargs-parser');
+  injectExports.parseArgs = yargsParser;
 }
 
 /*
