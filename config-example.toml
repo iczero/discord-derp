@@ -5,8 +5,13 @@
 enableCommands = false
 # if commands are enabled, command prefix
 prefix = '='
-# guilds where commands are allowed
-allowedGuilds = ['271781178296500235']
+# locations where commands are allowed
+commandsAllowed = [
+    # guild id
+    'guild:271781178296500235',
+    # a DM with user with id
+    'userDM:261580158798921740'
+]
 # max allowed message length
 # if not nitro, 2000, else 4000
 messageMaxLength = 2000

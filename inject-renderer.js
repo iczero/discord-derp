@@ -13,6 +13,19 @@ window.webpackChunkdiscord_app.push([['_inject'], {}, r => webpackRequire = r]);
 const modulesList = webpackRequire.c;
 const require = n => modulesList[n].exports;
 
+// type definitions
+/**
+ * @typedef {object} Channel
+ * @property {string} id
+ * @property {string | null} guild_id
+ * ... more
+ */
+/**
+ * @typedef {object} Guild
+ * @property {string} id
+ * ... more
+ */
+
 /**
  * Resolve modules by characteristics
  * @param {object} def
@@ -74,7 +87,7 @@ const resolvedModules = resolveModules({
   defaultAvatars: m => m.default?.DEFAULT_AVATARS instanceof Array
 });
 
-const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
+const { Endpoints, ActionTypes, ComponentActions, Permissions, ChannelTypes } = resolvedModules.data;
 const dispatcher = resolvedModules.dispatcher.default;
 const superagent = resolvedModules.superagent;
 const ComponentDispatch = resolvedModules.componentDispatch.ComponentDispatch;
@@ -746,7 +759,7 @@ function uuid() {
 // stupid commands
 let enableCommands = inject.config.enableCommands;
 const PREFIX = inject.config.prefix;
-const ALLOWED_GUILDS = new Set(inject.config.allowedGuilds);
+const COMMANDS_ALLOWED = new Set(inject.config.commandsAllowed);
 const ALLOWED_GUILDS_EXEMPT = new Set(['guildcommands', 'override', 'ordel']);
 const MESSAGE_MAX_LENGTH = inject.config.messageMaxLength;
 const EMBED_MAX_LENGTH = inject.config.embedMaxLength;
@@ -799,6 +812,113 @@ let wolframAlphaQueryLock = new PossiblySemaphore(1);
 
 let externalCommands = new Map();
 
+// literally has to be sent on every edit to a reply
+const REPLY_NO_PING = {
+  allowed_mentions: {
+    parse: ['users', 'roles', 'everyone'],
+    replied_user: false
+  }
+};
+class ExtCommandContext {
+  constructor(event, channel) {
+    this.event = event;
+
+    /** @type {string[]} */
+    this.args;
+    /** @type {string} */
+    this.rawArgs;
+    this.splitArgs();
+
+    /** @type {Channel} */
+    this.channel = channel
+    
+    /** @type {Guild | null} */
+    this.guild = null;
+    if (channel.guild_id) this.guild = guildRegistry.getGuild(channel.guild_id);
+
+    this.source = userRegistry.getUser(event.author.id);
+  }
+
+  splitArgs() {
+    this.rawArgs = this.event.content.slice(PREFIX.length);
+    this.args = this.rawArgs.split(/\s+/);
+  }
+
+  shift() {
+    this.args.shift();
+    let sepMatch = this.rawArgs.match(/\s+/);
+    if (sepMatch) this.rawArgs = this.rawArgs.slice(sepMatch.index + sepMatch[0].length);
+  }
+
+  sliceRawArgs(n) {
+    if (!n) return this.rawArgs;
+    let i = 1;
+    for (let match of this.rawArgs.matchAll(/\s+/g)) {
+      if (i++ >= n) return this.rawArgs.slice(match.index + match[0].length);
+    }
+  }
+
+  parseArgs(opts) {
+    return inject.parseArgs(this.rawArgs, opts);
+  }
+
+  /**
+   * Parse out code blocks in input, optionally of specific types
+   * @param {string[]} [types]
+   * @param {number} [sliceAt = 0] slice at argument number
+   */
+  parseCodeblocks(types = [], sliceAt = 0) {
+    let input = this.sliceRawArgs(sliceAt);
+    let codeblocks = [...input.matchAll(/`{3}(?:(\w+)\n)?(.+?)`{3}/gs)];
+    if (codeblocks.length) {
+      let inBlocks;
+      // look for codeblocks with the correct types
+      // match group 1 is language tag
+      let targetBlocks = codeblocks.filter(match => match[1] && types.includes(match[1].toLowerCase()));
+      if (targetBlocks.length) {
+        // input has matching code blocks, use those
+        inBlocks = targetBlocks;
+      } else {
+        // no blocks with matching type found
+        let untypedBlocks = codeblocks.filter(match => !match[1]);
+        if (untypedBlocks.length) {
+          // untyped blocks found, use those
+          inBlocks = untypedBlocks;
+        } else {
+          // all blocks are of the wrong type? assume typo and use all blocks
+          inBlocks = codeblocks;
+        }
+      }
+      input = inBlocks.map(match => match[2]).join('');
+    } else if (input.startsWith('`') && input.endsWith('`')) {
+      // simple inline codeblock that spans the entire message
+      input = input.slice(1, -1);
+    }
+    return input;
+  }
+
+  reply(body, mention = false) {
+    body.message_reference = {
+      guild_id: this.event.guild_id,
+      channel_id: this.event.channel_id,
+      message_id: this.event.id
+    };
+    if (!body.allowed_mentions) {
+      body.allowed_mentions = {
+        parse: ['users', 'roles', 'everyone'],
+        replied_user: mention
+      };
+    } else {
+      body.allowed_mentions.replied_user = mention;
+    }
+    return sendMessage(this.channel.id, body);
+  }
+  
+  isSelf() {
+    return this.source.id === userRegistry.getCurrentUser().id;
+  }
+}
+
 function registerExternalCommand(name, fn) {
   if (typeof fn === 'string') {
     let target = externalCommands.get(fn.toLowerCase());
@@ -809,29 +929,48 @@ function registerExternalCommand(name, fn) {
   } else throw new Error('wrong argument type');
 }
 
-registerExternalCommand('override', async (args, event) => {
-  if (event.author.id !== userRegistry.getCurrentUser().id) return;
-  if (args[0] === 'ordel') api.delete(Endpoints.MESSAGE(event.channel_id, event.id));
-  runCommand(args.slice(1), event);
+registerExternalCommand('override', async ctx => {
+  if (!ctx.isSelf()) return;
+  if (ctx.args[0] === 'ordel') api.delete(Endpoints.MESSAGE(ctx.channel.id, ctx.event.id));
+  ctx.shift();
+  runCommand(ctx);
 });
 registerExternalCommand('ordel', 'override');
-registerExternalCommand('guildcommands', async (args, event) => {
-  if (event.author.id !== userRegistry.getCurrentUser().id) return;
-  let subcommand = args[1].toLowerCase();
+registerExternalCommand('guildcommands', async ctx => {
+  if (!ctx.isSelf()) return;
+  let subcommand = ctx.args[1].toLowerCase();
+  let type;
+  let key;
+  switch (ctx.channel.type) {
+    case ChannelTypes.GUILD_TEXT:
+    case ChannelTypes.PRIVATE_THREAD:
+    case ChannelTypes.PUBLIC_THREAD:
+      type = 'guild';
+      key = 'guild:' + ctx.guild.id;
+      break;
+    
+    case ChannelTypes.DM:
+      type = 'DM';
+      key = 'userDM:' + ctx.channel.getRecipientId();
+      break;
+
+    default:
+      return;
+  }
   if (subcommand === 'enable') {
-    ALLOWED_GUILDS.add(event.guild_id);
-    await sendMessage(event.channel_id, { content: 'commands enabled for guild' });
+    COMMANDS_ALLOWED.add(key);
+    await ctx.reply({ content: 'commands enabled for ' + type });
   } else if (subcommand === 'disable') {
-    ALLOWED_GUILDS.delete(event.guild_id);
-    await sendMessage(event.channel_id, { content: 'commands disabled for guild' });
-  } else await sendMessage(event.channel_id, { content: '?' });
+    COMMANDS_ALLOWED.delete(key);
+    await ctx.reply({ content: 'commands disabled for ' + type });
+  } else await ctx.reply({ content: '?' });
 });
 
-registerExternalCommand('restart', async (args, event) => {
-  if (event.author.id !== userRegistry.getCurrentUser().id) return;
+registerExternalCommand('restart', async ctx => {
+  if (!ctx.isSelf()) return;
   window.DiscordNative.app.relaunch();
 });
-registerExternalCommand('ping', async (args, event) => {
+registerExternalCommand('ping', async ctx => {
   let id = generateNonce();
   let gatewayDeferred = new Deferred();
   pingInfo.set(id, gatewayDeferred.resolve);
@@ -839,7 +978,7 @@ registerExternalCommand('ping', async (args, event) => {
   let sendTs;
   let apiReturnTs;
   let [sent, gatewayReturnTs] = await Promise.all([
-    sendMessage(event.channel_id, {
+    ctx.reply({
       content: `(ping ${id})`,
       onSend: () => sendTs = Date.now()
     }).then(result => {
@@ -858,42 +997,42 @@ registerExternalCommand('ping', async (args, event) => {
     `**API timings**: rtt ${apiReturnTs - sendTs} ms, send ${serverTs - sendTs} ms, return ${apiReturnTs - serverTs} ms`,
     `**Gateway timings**: rtt ${gatewayReturnTs - sendTs} ms, return ${gatewayReturnTs - serverTs} ms`,
   ];
-  await editMessage(event.channel_id, sent.body.id, { content: out.join('\n') });
+  await editMessage(sent.body.channel_id, sent.body.id, { content: out.join('\n'), ...REPLY_NO_PING });
 });
-registerExternalCommand('annoy', async (args, event) => {
-  let mentions = event.mentions;
-  if (!mentions.length) return;
+registerExternalCommand('annoy', async ctx => {
+  let mentions = ctx.event.mentions;
+  if (!mentions.length) target = ctx.source.id;
   let target = mentions[0].id;
-  if (Math.random() < 0.05) target = event.author.id;
+  if (Math.random() < 0.05) target = ctx.source.id;
   let ntt = `<@${target}>`;
   if (ntt.length > 25) return;
   ntt = ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
   ntt += ntt + ntt + ntt + ntt + ntt + ntt + ntt + ntt;
-  await sendMessage(event.channel_id, { content: ntt });
+  await ctx.reply({ content: ntt });
 });
-registerExternalCommand('rms', async (args, event) => {
+registerExternalCommand('rms', async ctx => {
   // ABSOLUTELY PROPRIETARY
-  await sendMessage(event.channel_id, { content: 'https://i.redd.it/7ozal346p6kz.png' });
+  await ctx.reply({ content: 'https://i.redd.it/7ozal346p6kz.png' });
 });
 registerExternalCommand('proprietary', 'rms');
-registerExternalCommand('getavatar', async (args, event) => {
-  let mentions = event.mentions;
+registerExternalCommand('getavatar', async ctx => {
+  let mentions = ctx.event.mentions;
   if (!mentions.length) return;
   let target = mentions[0].id;
   let user = userRegistry.getUser(target);
   let globalUrl = resolveUserAvatar(user, null, 512);
   let guildUrl;
-  if (user.guildMemberAvatars[event.guild_id]) {
-    guildUrl = resolveUserAvatar(user, event.guild_id, 512);
+  if (user.guildMemberAvatars[ctx.guild.id]) {
+    guildUrl = resolveUserAvatar(user, ctx.guild.id, 512);
   }
   let reply = 'Global URL: ' + globalUrl.href;
   if (guildUrl) reply += '\nGuild URL: ' + guildUrl.href;
-  await sendMessage(event.channel_id, { content: reply });
+  await ctx.reply({ content: reply });
 });
-registerExternalCommand('wa', async (args, event) => {
-  let query = args.slice(1).join(' ').replace(/\n/g, ' ');
-  let user = userRegistry.getUser(event.author.id);
-  let avatarURL = resolveUserAvatar(user, event.guild_id, 64).href;
+registerExternalCommand('wa', async ctx => {
+  let query = ctx.sliceRawArgs(1).replace(/\n/g, ' ');
+  let user = ctx.source;
+  let avatarURL = resolveUserAvatar(user, ctx.guild.id, 64).href;
   let username = user.username;
   let displayedQuery = query;
   if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
@@ -920,7 +1059,7 @@ registerExternalCommand('wa', async (args, event) => {
     embed.description = randomArrayElement(WOLFRAMALPHA_LOADING_MESSAGES);
     embed.timestamp = (new Date()).toISOString();
     embed.color = color;
-    if (sent) await editMessage(event.channel_id, messageId, { embed });
+    if (sent) await editMessage(ctx.channel.id, messageId, { embed, ...REPLY_NO_PING });
   };
   if (wolframAlphaQueryLock.canAcquire()) updateLoadState('Running...', 0x2decfa);
   else updateLoadState('waiting for semaphore', 0xffff00);
@@ -928,7 +1067,7 @@ registerExternalCommand('wa', async (args, event) => {
     updateLoadState('Running...', 0x2decfa);
     return await inject.wolframAlphaQuery(query);
   });
-  sent = await sendMessage(event.channel_id, { embed });
+  sent = await ctx.reply({ embed });
   let messageId = sent.body.id;
 
   let response = null;
@@ -1071,9 +1210,9 @@ registerExternalCommand('wa', async (args, event) => {
     embed.timestamp = (new Date()).toISOString();
   }
 
-  await editMessage(event.channel_id, messageId, { embed });
+  await editMessage(ctx.channel.id, messageId, { embed, ...REPLY_NO_PING });
 });
-registerExternalCommand('cross', async (args, event) => {
+registerExternalCommand('cross', async ctx => {
   // but why am i doing this
   // todo: lift functions or something idk
   /**
@@ -1114,26 +1253,26 @@ registerExternalCommand('cross', async (args, event) => {
     if (s[0] === s[0].toUpperCase()) return [s[0], s[1]];
     else return [s[1], s[0]];
   }
-  if (args.length < 3) {
-    await sendMessage(event.channel_id, { content: 'must cross 2 things' });
+  if (ctx.args.length < 3) {
+    await ctx.reply({ content: 'must cross 2 things' });
     return;
   }
-  let genotype1 = parseGenotype(args[1]);
+  let genotype1 = parseGenotype(ctx.args[1]);
   if (genotype1.error) {
-    await sendMessage(event.channel_id, { content: 'genotype 1 error: ' + genotype1.error });
+    await ctx.reply({ content: 'genotype 1 error: ' + genotype1.error });
     return;
   }
-  let genotype2 = parseGenotype(args[2]);
+  let genotype2 = parseGenotype(ctx.args[2]);
   if (genotype2.error) {
-    await sendMessage(event.channel_id, { content: 'genotype 2 error: ' + genotype2.error });
+    await ctx.reply({ content: 'genotype 2 error: ' + genotype2.error });
     return;
   }
   if (Math.max(genotype1.alleles.length, genotype2.alleles.length) > 3) {
-    await sendMessage(event.channel_id, { content: 'too many alleles (blame message limit)' });
+    await ctx.reply({ content: 'too many alleles (blame message limit)' });
     return;
   }
   if (!arrayEquals(genotype1.alleles, genotype2.alleles)) {
-    await sendMessage(event.channel_id, { content: 'genotype alleles do not match' });
+    await ctx.reply({ content: 'genotype alleles do not match' });
     return;
   }
   let table = new Array(genotype1.gametes.length).fill(null);
@@ -1173,44 +1312,10 @@ registerExternalCommand('cross', async (args, event) => {
     .sort(([, v1], [, v2]) => v2 - v1)
     .map(([key, value]) => `${key}: ${value}/${total} (${(value / total * 100).toFixed(2)}%)`)
     .join('\n');
-  await sendMessage(event.channel_id, { content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
+  await ctx.reply({ content: '```\n' + prettyTable.join('\n') + '\n```\n' + freqInfo });
 });
 
-/**
- * Parse out code blocks in input, optionally of specific types
- * @param {string} input
- * @param {string[]} [types]
- */
-function parseCodeblocks(input, types = []) {
-  let codeblocks = [...input.matchAll(/`{3}(?:(\w+)\n)?(.+?)`{3}/gs)];
-  if (codeblocks.length) {
-    let inBlocks;
-    // look for codeblocks with the correct types
-    // match group 1 is language tag
-    let targetBlocks = codeblocks.filter(match => match[1] && types.includes(match[1].toLowerCase()));
-    if (targetBlocks.length) {
-      // input has matching code blocks, use those
-      inBlocks = targetBlocks;
-    } else {
-      // no blocks with matching type found
-      let untypedBlocks = codeblocks.filter(match => !match[1]);
-      if (untypedBlocks.length) {
-        // untyped blocks found, use those
-        inBlocks = untypedBlocks;
-      } else {
-        // all blocks are of the wrong type? assume typo and use all blocks
-        inBlocks = codeblocks;
-      }
-    }
-    input = inBlocks.map(match => match[2]).join('');
-  } else if (input.startsWith('`') && input.endsWith('`')) {
-    // simple inline codeblock that spans the entire message
-    input = input.slice(1, -1);
-  }
-  return input;
-}
 async function renderLatex(input, mode) {
-  input = parseCodeblocks(input, ['latex', 'tex']);
   // trim is necessary otherwise latex takes two newlines as \par
   if (mode === 'math') input = `\\[\n${input.trim()}\n\\]`;
   let result = await inject.makeLatexImage(input);
@@ -1250,12 +1355,12 @@ async function renderLatex(input, mode) {
 }
 
 const LATEX_EDIT_TIMEOUT = 15 * 60 * 1000;
-registerExternalCommand('tex', async (args, event) => {
-  let input = args.slice(1).join(' ');
-  let result = await renderLatex(input, args[0]);
-  let replyMessage = await sendMessage(event.channel_id, result);
+registerExternalCommand('tex', async ctx => {
+  let input = ctx.parseCodeblocks(['latex', 'tex'], 1);
+  let result = await renderLatex(input, ctx.args[0]);
+  let replyMessage = await ctx.reply(result);
   let initialReplyTime = Date.now();
-  let editHandler = new MessageUpdateHandler(event.channel_id, event.id, async (event, handler) => {
+  let editHandler = new MessageUpdateHandler(ctx.channel.id, ctx.event.id, async (event, handler) => {
     if (!event.content.startsWith(PREFIX)) {
       handler.unregister();
       return;
@@ -1265,35 +1370,32 @@ registerExternalCommand('tex', async (args, event) => {
     let args = splitCommandMessage(event.content);
     let input = args.slice(1).join(' ');
     let result = await renderLatex(input, args[0]);
-    replyMessage = await sendMessage(replyMessage.body.channel_id, result);
+    replyMessage = await ctx.reply(result);
   }, 60 * 1000);
   editHandler.register();
 });
 registerExternalCommand('math', 'tex');
-registerExternalCommand('align', async (args, event) => {
-  if (args.length < 3) {
-    await sendMessage(event.channel_id, { content: 'usage: align protein <fasta>' });
+registerExternalCommand('align', async ctx => {
+  if (ctx.args.length < 3) {
+    await ctx.reply({ content: 'usage: align protein <fasta>' });
     return;
   }
-  // sadness
-  let fullArgs = args.slice(1).join(' ');
-  let separator = fullArgs.match(/\s/).index;
-  let mode = fullArgs.slice(0, separator);
-  let input = parseCodeblocks(fullArgs.slice(separator + 1), []);
+  let mode = ctx.args[1];
+  let input = parseCodeblocks([], 2);
   let result;
   // TODO: make less bad
   if (mode === 'protein' || mode === 'nucleotide') {
     result = await inject.align.mafft(input);
   } else {
-    await sendMessage(event.channel_id, { content: 'unknown mode' });
+    await ctx.reply({ content: 'unknown mode' });
     return;
   }
-  await sendMessage(event.channel_id, {
+  await ctx.reply({
     content: '```\n' + result.slice(0, MESSAGE_MAX_LENGTH - 8) + '\n```'
   });
 });
-registerExternalCommand('random', async (args, event) => {
-  let splitArgs = args.slice(1).map(a => a.toLowerCase());
+registerExternalCommand('random', async ctx => {
+  let splitArgs = ctx.args.slice(1).map(a => a.toLowerCase());
   let short = false;
   let decimal = false;
   let encoding = 'hex';
@@ -1320,10 +1422,10 @@ registerExternalCommand('random', async (args, event) => {
       .reduce((acc, val, idx) => acc | (BigInt(val) << BigInt(idx * 32)), 0n)
       .toString();
   }
-  await sendMessage(event.channel_id, { content: reply });
+  await ctx.reply({ content: reply });
 });
-registerExternalCommand('roll', async (args, event) => {
-  let dice = args.slice(1).map(m => {
+registerExternalCommand('roll', async ctx => {
+  let dice = ctxargs.slice(1).map(m => {
     let spec = m.split('d');
     let count;
     if (spec[0].length) count = +spec[0];
@@ -1376,32 +1478,32 @@ registerExternalCommand('roll', async (args, event) => {
     if (!dice.length) content = 'invalid syntax, use <count>d<sides> [...]';
     else content = 'too long';
   }
-  await sendMessage(event.channel_id, { content });
+  await ctx.reply({ content });
 });
-registerExternalCommand('color', async (args, event) => {
+registerExternalCommand('color', async ctx => {
   let canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
-  let ctx = canvas.getContext('2d');
+  let cctx = canvas.getContext('2d');
   let color;
-  if (args.length > 1) color = args.slice(1).join(' ');
+  if (ctx.args.length > 1) color = ctx.args.slice(1).join(' ');
   else color = '#' + inject.random.read(3, 'hex');
   // normalize color
   let testStyle = document.createElement('div').style;
   testStyle.color = color;
   if (!testStyle.color) {
-    await sendMessage(event.channel_id, { content: 'invalid color' });
+    await ctx.reply({ content: 'invalid color' });
     return;
   }
-  ctx.fillStyle = testStyle.color;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  cctx.fillStyle = testStyle.color;
+  cctx.fillRect(0, 0, canvas.width, canvas.height);
   // webp alters the color slightly
   let blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-  await sendMessage(event.channel_id, { content: testStyle.color, file: blob, filename: 'blob.png' });
+  await ctx.reply({ content: testStyle.color, file: blob, filename: 'blob.png' });
 });
-registerExternalCommand('uuid', async (args, event) => {
+registerExternalCommand('uuid', async ctx => {
   // generate v4 uuid
-  let count = +args[1];
+  let count = +ctx.args[1];
   if (Number.isNaN(count) || count < 1) count = 1;
   const LINE_LENGTH = 38; // uuid and backticks
   let out = [];
@@ -1413,7 +1515,7 @@ registerExternalCommand('uuid', async (args, event) => {
     out.push(`\`${uuid()}\``);
     outLength = newLength;
   }
-  await sendMessage(event.channel_id, { content: out.join('\n') });
+  await ctx.reply({ content: out.join('\n') });
 });
 /*
 registerExternalCommand('eval', async (args, event) => {
@@ -1463,10 +1565,10 @@ gatewayEvents.on('CHANNEL_UPDATE', ev => {
 });
 gatewayEvents.on('PRESENCE_UPDATE', ev => feedRandom(ev.user?.id, ev.last_modified, ev.status));
 
-async function runCommand(args, event) {
-  log('command:', args[0], event);
-  let fn = externalCommands.get(args[0].toLowerCase());
-  if (fn) fn(args, event);
+async function runCommand(ctx) {
+  log('command:', ctx.args[0], ctx);
+  let fn = externalCommands.get(ctx.args[0].toLowerCase());
+  if (fn) fn(ctx);
 }
 
 /**
@@ -1499,12 +1601,31 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
   // handle commands
   if (!event.content.startsWith(PREFIX)) return;
   let args = splitCommandMessage(event.content);
-  if (!ALLOWED_GUILDS.has(event.guild_id)) {
+
+  let commandsAllowedKey;
+  switch (channel.type) {
+    case ChannelTypes.GUILD_TEXT:
+    case ChannelTypes.PRIVATE_THREAD:
+    case ChannelTypes.PUBLIC_THREAD:
+      commandsAllowedKey = 'guild:' + event.guild_id;
+      break;
+    
+    case ChannelTypes.DM:
+      commandsAllowedKey = 'userDM:' + channel.getRecipientId();
+      break;
+
+    default:
+      return;
+  }
+  if (!COMMANDS_ALLOWED.has(commandsAllowedKey)) {
     if (!ALLOWED_GUILDS_EXEMPT.has(args[0].toLowerCase())) return;
   }
+
+  let ctx = new ExtCommandContext(event, channel);
+
   try {
-    runCommand(args, event);
+    runCommand(ctx);
   } catch (err) {
-    log('error running command!', args, err);
+    log('error running command!', ctx, err);
   }
 });
