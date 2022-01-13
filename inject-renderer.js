@@ -70,7 +70,8 @@ const resolvedModules = resolveModules({
   experiments: m => m.default && typeof m.default.isDeveloper !== 'undefined',
   slowmode: m => m.default && typeof m.SlowmodeType === 'object',
   stickers: m => m.default && typeof m.default.getStickerById === 'function',
-  guildAvatars: m => m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function'
+  guildAvatars: m => m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function',
+  defaultAvatars: m => m.default?.DEFAULT_AVATARS instanceof Array
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions } = resolvedModules.data;
@@ -98,6 +99,7 @@ const guildChannelRegistry = resolvedModules.guildChannels.default;
 const SlowmodeType = resolvedModules.slowmode.SlowmodeType;
 const stickerRegistry = resolvedModules.stickers.default;
 const guildAvatarRegistry = resolvedModules.guildAvatars.default;
+const { DEFAULT_AVATARS } = resolvedModules.defaultAvatars.default;
 
 // late load modules
 let messageHooks = null;
@@ -769,6 +771,28 @@ const WOLFRAMALPHA_LOADING_MESSAGES = [
   '> Preparing to paste a very large amount of text...\n - iczero',
 ];
 
+function resolveUserAvatar(user, guildId = null, size = null) {
+  if (user.avatar) {
+    let ext = 'png';
+    let url;
+    let guildAvatarId = user.guildMemberAvatars[guildId];
+    if (guildId && guildAvatarId) {
+      if (guildAvatarId.startsWith('a_')) ext = 'gif';
+      url = new URL(
+        Endpoints.GUILD_MEMBER_AVATAR(guildId, user.id, guildAvatarId, ext),
+        'https://' + window.GLOBAL_ENV.CDN_HOST
+      );
+    } else {
+      if (user.avatar.startsWith('a_')) ext = 'gif';
+      url = new URL(`https://${window.GLOBAL_ENV.CDN_HOST}/avatars/${user.id}/${user.avatar}.${ext}`);
+    }
+    url.searchParams.set('size', size);
+    return url;
+  } else {
+    return new URL(user.avatarURL, 'https:' + window.GLOBAL_ENV.ASSET_ENDPOINT);
+  }
+}
+
 // for some... reason, the wolframalpha thing cannot be run twice at the same time
 // or discord will commit suicide by SIGILL
 let wolframAlphaQueryLock = new PossiblySemaphore(1);
@@ -857,25 +881,10 @@ registerExternalCommand('getavatar', async (args, event) => {
   if (!mentions.length) return;
   let target = mentions[0].id;
   let user = userRegistry.getUser(target);
-  let globalUrl;
+  let globalUrl = resolveUserAvatar(user, null, 512);
   let guildUrl;
-  if (user.avatar) {
-    let ext = 'png';
-    if (user.avatar.startsWith('a_')) ext = 'gif';
-    globalUrl = new URL(`https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${ext}`);
-    globalUrl.searchParams.set('size', '512');
-  } else {
-    globalUrl = new URL(user.avatarURL, 'https://discordapp.com/');
-  }
-  let guildAvatarId = user.guildMemberAvatars[event.guild_id];
-  if (guildAvatarId) {
-    let ext = 'png';
-    if (guildAvatarId.startsWith('a_')) ext = 'gif';
-    guildUrl = new URL(
-      Endpoints.GUILD_MEMBER_AVATAR(event.guild_id, user.id, guildAvatarId, ext),
-      'https://cdn.discordapp.com/'
-    );
-    guildUrl.searchParams.set('size', '512');
+  if (user.guildMemberAvatars[event.guild_id]) {
+    guildUrl = resolveUserAvatar(user, event.guild_id, 512);
   }
   let reply = 'Global URL: ' + globalUrl.href;
   if (guildUrl) reply += '\nGuild URL: ' + guildUrl.href;
@@ -884,7 +893,7 @@ registerExternalCommand('getavatar', async (args, event) => {
 registerExternalCommand('wa', async (args, event) => {
   let query = args.slice(1).join(' ').replace(/\n/g, ' ');
   let user = userRegistry.getUser(event.author.id);
-  let avatarURL = user.getAvatarURL();
+  let avatarURL = resolveUserAvatar(user, event.guild_id, 64).href;
   let username = user.username;
   let displayedQuery = query;
   if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
