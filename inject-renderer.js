@@ -1425,7 +1425,7 @@ registerExternalCommand('random', async ctx => {
   await ctx.reply({ content: reply });
 });
 registerExternalCommand('roll', async ctx => {
-  let dice = ctxargs.slice(1).map(m => {
+  let dice = ctx.args.slice(1).map(m => {
     let spec = m.split('d');
     let count;
     if (spec[0].length) count = +spec[0];
@@ -1564,6 +1564,7 @@ gatewayEvents.on('CHANNEL_UPDATE', ev => {
   return feedRandom(ev.id, ev.name, ev.last_message_id);
 });
 gatewayEvents.on('PRESENCE_UPDATE', ev => feedRandom(ev.user?.id, ev.last_modified, ev.status));
+gatewayEvents.on('TYPING_START', ev => feedRandom(ev.channel_id, ev.user_id));
 
 async function runCommand(ctx) {
   log('command:', ctx.args[0], ctx);

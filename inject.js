@@ -40,8 +40,11 @@ Object.defineProperty(electronModule, 'exports', {
         if (isMainWindow) {
           // replace preload script with our own
           opts.webPreferences = Object.assign({}, opts.webPreferences, {
-            preload: path.join(__dirname, 'inject-preload.js')
+            preload: path.join(__dirname, 'inject-preload.js'),
+            // force enable devtools
+            devTools: true
           });
+
         } else {
           log('created window does not match title', MAIN_WINDOW_TITLE);
         }
@@ -142,7 +145,11 @@ module.exports = require('discord_desktop_core/core.asar');
 // inject-preload needs this path to load DiscordNative and modules are not in
 // the require path for renderer processes
 electron.ipcMain.on('INJECT_GET_CORE_MODULE_PATH', event => {
-  event.returnValue = path.dirname(require.resolve('discord_desktop_core'))
+  event.returnValue = path.dirname(require.resolve('discord_desktop_core'));
+
+  // ensure devtools is enabled
+  const discordCreateApplicationMenu = require('discord_desktop_core/core.asar/app/applicationMenu');
+  electron.Menu.setApplicationMenu(discordCreateApplicationMenu(true));
 });
 
 // crash handling because electron sucks at handling crashes
