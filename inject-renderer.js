@@ -1030,6 +1030,10 @@ registerExternalCommand('getavatar', async ctx => {
   await ctx.reply({ content: reply });
 });
 registerExternalCommand('wa', async ctx => {
+  // TODO: discord no longer allows non-bot users to send embeds, fix this
+  await ctx.reply({ content: 'can no longer send embeds, wolframalpha requires refactoring' });
+  return;
+
   let query = ctx.sliceRawArgs(1).replace(/\n/g, ' ');
   let user = ctx.source;
   let avatarURL = resolveUserAvatar(user, ctx.guild.id, 64).href;
