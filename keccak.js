@@ -578,6 +578,7 @@ class KeccakRand extends KeccakWritable {
     /**
      * Ensure at least count bytes are available in buffer, otherwise, drop buffer
      * and generate new block
+     * _bufferIndex MUST be advanced by the caller
      * @param bytes Byte count
      */
     _ensureAllocateSmall(bytes) {
@@ -694,6 +695,7 @@ class KeccakRand extends KeccakWritable {
             let num = buf.readUIntLE(index, bytes);
             let denom = 256 ** bytes;
             r = num / denom;
+            this._bufferIndex += bytes;
         }
         else {
             // Buffer.readUIntLE only supports up to 6 bytes (48 bits), for larger
