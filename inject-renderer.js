@@ -60,7 +60,7 @@ function resolveModules(def) {
 const resolvedModules = resolveModules({
   react: m => typeof m.version === 'string' && m.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED && typeof m.createElement === 'function',
   data: m => m.Endpoints && typeof m.Endpoints.MESSAGES === 'function',
-  dispatcher: m => m.default && typeof m.default.subscribe === 'function' && typeof m.Dispatcher === 'function',
+  dispatcher: m => m.default && typeof m.default.dispatch === 'function' && typeof m.default._currentDispatchActionType !== 'undefined',
   superagent: m => typeof m === 'function' && typeof m.get === 'function' && typeof m.post === 'function',
   componentDispatch: m => typeof m.ComponentDispatch === 'object',
   api: m => m.default && typeof m.default.patch === 'function' && typeof m.default.post === 'function',
