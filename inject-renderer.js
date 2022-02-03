@@ -948,7 +948,7 @@ registerExternalCommand('guildcommands', async ctx => {
       type = 'guild';
       key = 'guild:' + ctx.guild.id;
       break;
-    
+
     case ChannelTypes.DM:
       type = 'DM';
       key = 'userDM:' + ctx.channel.getRecipientId();
@@ -1022,8 +1022,8 @@ registerExternalCommand('getavatar', async ctx => {
   let user = userRegistry.getUser(target);
   let globalUrl = resolveUserAvatar(user, null, 512);
   let guildUrl;
-  if (user.guildMemberAvatars[ctx.guild.id]) {
-    guildUrl = resolveUserAvatar(user, ctx.guild.id, 512);
+  if (user.guildMemberAvatars[ctx.guild?.id]) {
+    guildUrl = resolveUserAvatar(user, ctx.guild?.id, 512);
   }
   let reply = 'Global URL: ' + globalUrl.href;
   if (guildUrl) reply += '\nGuild URL: ' + guildUrl.href;
@@ -1036,7 +1036,7 @@ registerExternalCommand('wa', async ctx => {
 
   let query = ctx.sliceRawArgs(1).replace(/\n/g, ' ');
   let user = ctx.source;
-  let avatarURL = resolveUserAvatar(user, ctx.guild.id, 64).href;
+  let avatarURL = resolveUserAvatar(user, ctx.guild?.id, 64).href;
   let username = user.username;
   let displayedQuery = query;
   if (query.length > 100) displayedQuery = query.slice(0, 100) + '...';
