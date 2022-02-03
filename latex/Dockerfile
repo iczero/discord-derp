@@ -1,23 +1,22 @@
 FROM ubuntu:20.04
 ENV DEBIAN_FRONTEND noninteractive
 
-RUN apt update
-RUN apt upgrade -y wget perl ghostscript gnupg
+RUN apt update && \
+    apt upgrade -y wget perl ghostscript gnupg
 
 WORKDIR /root/texlive-install
-RUN wget http://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz
-RUN tar -xvf install-tl-unx.tar.gz --strip-components 1
 COPY texlive.profile .
-RUN ./install-tl -profile texlive.profile
-RUN rm -rf /root/texlive-install
+RUN wget http://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz && \
+    tar -xvf install-tl-unx.tar.gz --strip-components 1 && \
+    ./install-tl -profile texlive.profile && \
+    rm -rf /root/texlive-install
 
-RUN tlmgr update --self
-RUN tlmgr install xkeyval simplekv standalone preview microtype varwidth chemfig etoolbox
-RUN tlmgr path add
+RUN tlmgr update --self && \
+    tlmgr install xkeyval simplekv standalone preview microtype varwidth \
+        chemfig etoolbox latexmk && \
+    tlmgr path add
 
 VOLUME /data
 WORKDIR /data
 
 COPY compile.sh /opt
-
-CMD ["/opt/compile.sh"]
