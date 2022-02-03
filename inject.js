@@ -58,10 +58,6 @@ Object.defineProperty(electronModule, 'exports', {
           });
           blocker.enableBlockingInSession(this.webContents.session);
           log('installed adblocker on window', opts.title);
-
-          blocker.on('request-blocked', (request) => {
-            log('blocked', request.url, 'on window', opts.title);
-          });
         })();
         if (isMainWindow) {
           // store the main window for later
