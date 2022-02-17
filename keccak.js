@@ -18,11 +18,14 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.KeccakRand = exports.Keccak = exports.KeccakWritable = exports.pad = exports.PI_TRANSFORM = exports.R = exports.RC = void 0;
 const stream = __importStar(require("stream"));
-const shouldDebug = Boolean(process.env.DEBUG);
-const debug = shouldDebug ? console.log.bind(console, 'debug:') : () => { };
+const debug_1 = __importDefault(require("debug"));
+const debug = (0, debug_1.default)('keccak');
 /** Round constants */
 exports.RC = Object.freeze([
     [0x00000000, 0x00000001], [0x00000000, 0x00008082], [0x80000000, 0x0000808A],
@@ -579,6 +582,7 @@ class KeccakRand extends KeccakWritable {
      * Ensure at least count bytes are available in buffer, otherwise, drop buffer
      * and generate new block
      * _bufferIndex MUST be advanced by the caller
+     * byte length MUST be less than this.byterate
      * @param bytes Byte count
      */
     _ensureAllocateSmall(bytes) {
@@ -668,6 +672,60 @@ class KeccakRand extends KeccakWritable {
             buf[index + 1] |= 0xf0;
             out[outIdx] = buf.readDoubleBE(index) - 1;
             index += 7;
+        }
+        return out;
+    }
+    /** Generate a boolean value */
+    bool() {
+        this._ensureAllocateSmall(1);
+        let buf = this._buffer;
+        let index = this._bufferIndex;
+        let ret = Boolean(buf[index] & 1);
+        this._bufferIndex++;
+        return ret;
+    }
+    /**
+     * Generate many boolean values
+     * @param count Number of values to generate. Actual value may be greater
+     */
+    boolMany(count) {
+        let requiredBytes = Math.ceil(count / 8);
+        let [buf, index] = this._ensureAllocateLarge(requiredBytes);
+        let ret = Array(requiredBytes * 8);
+        for (let i = 0; i < requiredBytes; i++) {
+            for (let j = 0; j < 8; j++) {
+                ret[i * 8 + j] = Boolean(buf[index + i] & (1 << j));
+            }
+        }
+        return ret;
+    }
+    /**
+     * Sample a normal distribution
+     * @param mean Distribution mean
+     * @param stdev Distribution standard deviation
+     */
+    norm(mean = 0, stdev = 1) {
+        let [u1, u2] = this.floatMany(2);
+        let z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        return z * stdev + mean;
+    }
+    /**
+     * Sample a normal distribution many times
+     * @param count Number of samples to generate. Actual value may be greater
+     * @param mean Distribution mean
+     * @param stdev Distribution standard deviation
+     */
+    normMany(count, mean = 0, stdev = 1) {
+        let iterCount = Math.ceil(count / 2);
+        let floats = this.floatMany(iterCount * 2);
+        let out = new Array(iterCount * 2);
+        for (let i = 0; i < iterCount * 2; i += 2) {
+            let u1 = floats[i];
+            let u2 = floats[i + 1];
+            let z1 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            let z2 = Math.sqrt(-2 * Math.log(u1)) * Math.sin(2 * Math.PI * u2);
+            out[i] = z1 * stdev + mean;
+            out[i + 1] = z2 * stdev + mean;
         }
         return out;
     }

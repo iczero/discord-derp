@@ -1,7 +1,6 @@
 import * as stream from 'stream';
-
-const shouldDebug = Boolean(process.env.DEBUG);
-const debug = shouldDebug ? console.log.bind(console, 'debug:') : () => {};
+import _debug from 'debug';
+const debug = _debug('keccak');
 
 // [most significant, least significant]
 type U64Pair = Uint32Array;
@@ -584,6 +583,7 @@ export class KeccakRand extends KeccakWritable {
    * Ensure at least count bytes are available in buffer, otherwise, drop buffer
    * and generate new block
    * _bufferIndex MUST be advanced by the caller
+   * byte length MUST be less than this.byterate
    * @param bytes Byte count
    */
   _ensureAllocateSmall(bytes: number) {
@@ -672,6 +672,64 @@ export class KeccakRand extends KeccakWritable {
       buf[index + 1] |= 0xf0;
       out[outIdx] = buf.readDoubleBE(index) - 1;
       index += 7;
+    }
+    return out;
+  }
+
+  /** Generate a boolean value */
+  bool(): boolean {
+    this._ensureAllocateSmall(1);
+    let buf = this._buffer!;
+    let index = this._bufferIndex;
+    let ret = Boolean(buf[index] & 1);
+    this._bufferIndex++;
+    return ret;
+  }
+
+  /**
+   * Generate many boolean values
+   * @param count Number of values to generate. Actual value may be greater
+   */
+  boolMany(count: number): boolean[] {
+    let requiredBytes = Math.ceil(count / 8);
+    let [buf, index] = this._ensureAllocateLarge(requiredBytes);
+    let ret = Array(requiredBytes * 8);
+    for (let i = 0; i < requiredBytes; i++) {
+      for (let j = 0; j < 8; j++) {
+        ret[i * 8 + j] = Boolean(buf[index + i] & (1 << j));
+      }
+    }
+    return ret;
+  }
+
+  /**
+   * Sample a normal distribution
+   * @param mean Distribution mean
+   * @param stdev Distribution standard deviation
+   */
+  norm(mean = 0, stdev = 1): number {
+    let [u1, u2] = this.floatMany(2);
+    let z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return z * stdev + mean;
+  }
+
+  /**
+   * Sample a normal distribution many times
+   * @param count Number of samples to generate. Actual value may be greater
+   * @param mean Distribution mean
+   * @param stdev Distribution standard deviation
+   */
+  normMany(count: number, mean = 0, stdev = 1): number[] {
+    let iterCount = Math.ceil(count / 2);
+    let floats = this.floatMany(iterCount * 2);
+    let out: number[] = new Array(iterCount * 2);
+    for (let i = 0; i < iterCount * 2; i += 2) {
+      let u1 = floats[i];
+      let u2 = floats[i + 1];
+      let z1 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      let z2 = Math.sqrt(-2 * Math.log(u1)) * Math.sin(2 * Math.PI * u2);
+      out[i] = z1 * stdev + mean;
+      out[i + 1] = z2 * stdev + mean;
     }
     return out;
   }

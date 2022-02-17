@@ -171,6 +171,10 @@ if (window.opener === null) {
     floatMany: keccakRand.floatMany.bind(keccakRand),
     int: keccakRand.int.bind(keccakRand),
     intMany: keccakRand.intMany.bind(keccakRand),
+    bool: keccakRand.bool.bind(keccakRand),
+    boolMany: keccakRand.boolMany.bind(keccakRand),
+    norm: keccakRand.norm.bind(keccakRand),
+    normMany: keccakRand.normMany.bind(keccakRand),
     readRaw: keccakRand.bunchOfUint32Arrays.bind(keccakRand)
   };
 
