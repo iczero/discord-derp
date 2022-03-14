@@ -176,11 +176,13 @@ function lateResolveModules() {
       }
     }, [message.id, channel.id]);
   };
+
+  // register handler later to ensure no events are dropped
+  inject.registerEventHandler(preloadEvents.emit.bind(preloadEvents));
 }
 
 // events from preload
 let preloadEvents = new EventEmitter();
-inject.registerEventHandler(preloadEvents.emit.bind(preloadEvents));
 
 // events from discord gateway
 let gatewayEvents = new EventEmitter();
