@@ -3,4 +3,5 @@
 
 node_modules
 /config.toml
+/custom.css
 .adblocker.cache

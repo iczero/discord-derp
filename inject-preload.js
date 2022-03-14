@@ -1,6 +1,7 @@
 const electron = require('electron');
 const path = require('path');
-const fsP = require('fs').promises;
+const fs = require('fs');
+const fsP = require('fs/promises');
 const childProcess = require('child_process');
 const EventEmitter = require('events');
 const toml = require('@iarna/toml');
@@ -11,6 +12,15 @@ const ref = require('ref-napi');
 const { Keccak, KeccakRand } = require('./keccak');
 
 const log = (...args) => console.log('inject-preload:', ...args);
+
+class Deferred {
+  constructor() {
+    this.promise = new Promise((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
+  }
+}
 
 let injectExports = Object.create(null);
 
@@ -67,6 +77,22 @@ require(path.join(CORE_MODULE_PATH, 'core.asar/app/mainScreenPreload.js'));
 // ipc is probably safe to export
 injectExports.ipc = electron.ipcRenderer;
 injectExports.console = console;
+
+// preload to renderer events
+let rendererEventHandler = null;
+injectExports.registerEventHandler = handler => {
+  log('received event handler from renderer');
+  rendererEventHandler = handler;
+  rendererDefer.resolve();
+};
+function emitRendererEvent(event, ...args) {
+  if (rendererEventHandler) {
+    rendererEventHandler(event, ...args);
+  }
+}
+
+let rendererDefer = new Deferred();
+let rendererWait = rendererDefer.promise;
 
 if (window.opener === null) {
   // we are in main window
@@ -220,6 +246,22 @@ if (window.opener === null) {
   const yargsParser = require('yargs-parser');
   injectExports.parseArgs = yargsParser;
 }
+
+(async () => {
+  // custom css loader
+  const THEME_PATH = path.join(__dirname, 'custom.css');
+  async function reloadCSS() {
+    let css = await fsP.readFile(THEME_PATH, 'utf-8');
+    emitRendererEvent('css-update', css);
+  }
+
+  await rendererWait;
+  reloadCSS();
+  fs.watch(THEME_PATH, type => {
+    log(`custom css changed (${type}), reloading`);
+    reloadCSS();
+  });
+})();
 
 /*
 {

@@ -178,6 +178,11 @@ function lateResolveModules() {
   };
 }
 
+// events from preload
+let preloadEvents = new EventEmitter();
+inject.registerEventHandler(preloadEvents.emit.bind(preloadEvents));
+
+// events from discord gateway
 let gatewayEvents = new EventEmitter();
 
 // we get injected before GatewaySocket.connect is called
@@ -756,6 +761,14 @@ function uuid() {
   return uuid;
 }
 
+// custom styling
+let cssOverride = document.createElement('style');
+document.head.appendChild(cssOverride);
+document.body.classList.add('theme-override');
+preloadEvents.on('css-update', css => {
+  cssOverride.innerText = css;
+});
+
 // stupid commands
 let enableCommands = inject.config.enableCommands;
 const PREFIX = inject.config.prefix;
@@ -931,9 +944,10 @@ function registerExternalCommand(name, fn) {
 
 registerExternalCommand('override', async ctx => {
   if (!ctx.isSelf()) return;
-  if (ctx.args[0] === 'ordel') api.delete(Endpoints.MESSAGE(ctx.channel.id, ctx.event.id));
+  let shouldDelete = ctx.args[0] === 'ordel'
   ctx.shift();
-  runCommand(ctx);
+  await runCommand(ctx);
+  if (shouldDelete) api.delete(Endpoints.MESSAGE(ctx.channel.id, ctx.event.id));
 });
 registerExternalCommand('ordel', 'override');
 registerExternalCommand('guildcommands', async ctx => {

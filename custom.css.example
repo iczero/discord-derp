@@ -1,0 +1,6 @@
+/* put css overrides in this file */
+.theme-override {
+    /* can be used to override discord theme colors, for example:
+    --background-primary: #000000;
+    */
+}
