@@ -249,22 +249,26 @@ if (window.opener === null) {
 
 (async () => {
   // custom css loader
-  const THEME_PATH = path.join(__dirname, 'custom.css');
+  const CSS_FILENAME = 'custom.css';
+  const CSS_DIRNAME = __dirname;
+  const CSS_PATH = path.join(CSS_DIRNAME, CSS_FILENAME);
   async function reloadCSS() {
     try {
-      let css = await fsP.readFile(THEME_PATH, 'utf-8');
+      let css = await fsP.readFile(CSS_PATH, 'utf-8');
       emitRendererEvent('css-update', css);
       return true;
     } catch (err) {
       if (err?.code !== 'ENOENT') throw err;
-      log(`custom css (${THEME_PATH}) not found`);
+      log(`custom css (${CSS_PATH}) not found`);
       return false;
     }
   }
 
   await rendererWait;
   if (!await reloadCSS()) return;
-  fs.watch(THEME_PATH, type => {
+  fs.watch(CSS_DIRNAME, (type, filename) => {
+    log('filename:', filename);
+    if (filename !== CSS_FILENAME) return;
     log(`custom css changed (${type}), reloading`);
     reloadCSS();
   });

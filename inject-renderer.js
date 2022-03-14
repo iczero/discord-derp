@@ -768,7 +768,7 @@ let cssOverride = document.createElement('style');
 document.head.appendChild(cssOverride);
 document.body.classList.add('theme-override');
 preloadEvents.on('css-update', css => {
-  cssOverride.innerText = css;
+  cssOverride.innerHTML = css;
 });
 
 // stupid commands
