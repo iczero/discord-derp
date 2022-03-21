@@ -67,7 +67,7 @@ const resolvedModules = resolveModules({
   users: m => m.default && typeof m.default.getUsers === 'function',
   channels: m => m.default && typeof m.default.getChannel === 'function',
   guilds: m => m.default && typeof m.default.getGuilds === 'function',
-  guildMembers: m => m.default && typeof m.default.getAllGuildsAndMembers === 'function',
+  guildMembers: m => m.default && typeof m.default.getMutableAllGuildsAndMembers === 'function' && typeof m.default.getNicknames === 'function',
   guildChannels: m => m.default && typeof m.default.getChannels === 'function' && m.GUILD_SELECTABLE_CHANNELS_KEY,
   guildMemberCount: m => m.default && typeof m.default.getMemberCount === 'function',
   emojis: m => typeof m.EmojiDisambiguations === 'function' && m.default && m.default.constructor.persistKey === 'EmojiStoreV2',
@@ -846,7 +846,7 @@ class ExtCommandContext {
 
     /** @type {Channel} */
     this.channel = channel
-    
+
     /** @type {Guild | null} */
     this.guild = null;
     if (channel.guild_id) this.guild = guildRegistry.getGuild(channel.guild_id);
@@ -928,7 +928,7 @@ class ExtCommandContext {
     }
     return sendMessage(this.channel.id, body);
   }
-  
+
   isSelf() {
     return this.source.id === userRegistry.getCurrentUser().id;
   }
@@ -1113,7 +1113,7 @@ registerExternalCommand('wa', async ctx => {
       embed.color = 0xff0000;
       break process;
     }
-  
+
     if (response.failed) {
       embed.color = 0xff0000;
       embed.description = '**No results**';
@@ -1630,7 +1630,7 @@ gatewayEvents.on('MESSAGE_CREATE', async event => {
     case ChannelTypes.PUBLIC_THREAD:
       commandsAllowedKey = 'guild:' + event.guild_id;
       break;
-    
+
     case ChannelTypes.DM:
       commandsAllowedKey = 'userDM:' + channel.getRecipientId();
       break;
