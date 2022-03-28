@@ -12,6 +12,7 @@
 \usepackage{tikz}
 \usepackage{xcolor}
 \usepackage{chemfig}
+\usetikzlibrary{positioning}
 \begin{document}
 \color{white}
 \begin{varwidth}{500pt}

@@ -84,7 +84,10 @@ const resolvedModules = resolveModules({
   slowmode: m => m.default && typeof m.SlowmodeType === 'object',
   stickers: m => m.default && typeof m.default.getStickerById === 'function',
   guildAvatars: m => m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function',
-  defaultAvatars: m => m.default?.DEFAULT_AVATARS instanceof Array
+  defaultAvatars: m => m.default?.DEFAULT_AVATARS instanceof Array,
+  permissionsEvaluator: m => m?.ALLOW && typeof m?.default?.computePermissions === 'function',
+  channel: m => typeof m?.default?.prototype?.isActiveThread === 'function' && typeof m?.default?.prototype?.isVocal === 'function',
+  guild: m => typeof m?.default?.prototype?.getIconSource === 'function' && typeof m?.default?.prototype?.isOwnerWithRequiredMfaLevel === 'function'
 });
 
 const { Endpoints, ActionTypes, ComponentActions, Permissions, ChannelTypes } = resolvedModules.data;
@@ -113,6 +116,9 @@ const SlowmodeType = resolvedModules.slowmode.SlowmodeType;
 const stickerRegistry = resolvedModules.stickers.default;
 const guildAvatarRegistry = resolvedModules.guildAvatars.default;
 const { DEFAULT_AVATARS } = resolvedModules.defaultAvatars.default;
+const permissionsEvaluator = resolvedModules.permissionsEvaluator.default;
+const Channel = resolvedModules.channel.default;
+const Guild = resolvedModules.guild.default;
 
 // late load modules
 let messageHooks = null;
@@ -233,20 +239,42 @@ Math.random = inject.random.float;
 
 /**
  * Pretty-print channel by id
- * @param {string} id channel id
+ * @param {string | Channel} channel channel id or object
  * @return {string}
  */
-function formatChannel(id) {
-  let channel = channelRegistry.getChannel(id);
+function formatChannel(channel) {
+  let id = null;
+  if (typeof channel === 'string') {
+    id = channel;
+    channel = channelRegistry.getChannel(channel);
+  }
   if (channel) {
     let guild = guildRegistry.getGuild(channel.guild_id);
     if (guild) {
-      return `${guild.name}/#${channel.name} (${id})`;
+      return `${guild.name}/#${channel.name} (${channel.id})`;
     } else {
-      return `<unknown guild ${channel.guild_id}>/#${channel.name} (${id})`;
+      return `<unknown guild ${channel.guild_id}>/#${channel.name} (${channel.id})`;
     }
   } else {
     return `<unknown channel ${id}>`;
+  }
+}
+
+/**
+ * Pretty-print user by id
+ * @param {string | User} user user id or object
+ * @return {string}
+ */
+function formatUser(user) {
+  let id = null;
+  if (typeof user === 'string') {
+    id = user;
+    user = userRegistry.getUser(user);
+  }
+  if (user) {
+    return `@${user.username}#${user.discriminator} (${user.id})`;
+  } else {
+    return `<unknown user ${id}>`;
   }
 }
 
@@ -1387,9 +1415,9 @@ registerExternalCommand('tex', async ctx => {
     }
     if (Date.now() < initialReplyTime + LATEX_EDIT_TIMEOUT) handler.resetTimeout();
     await api.delete(Endpoints.MESSAGE(replyMessage.body.channel_id, replyMessage.body.id));
-    let args = splitCommandMessage(event.content);
-    let input = args.slice(1).join(' ');
-    let result = await renderLatex(input, args[0]);
+    let ctx2 = new ExtCommandContext(event, ctx.channel);
+    let input = ctx2.parseCodeblocks(['latex', 'tex'], 1);
+    let result = await renderLatex(input, ctx2.args[0]);
     replyMessage = await ctx.reply(result);
   }, 60 * 1000);
   editHandler.register();
