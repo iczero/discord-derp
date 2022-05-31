@@ -19,67 +19,62 @@ let mainWindow = null;
 
 // grab actual electron module itself (not its exports) from node.js
 let electronModule = require.cache[require.resolve('electron')];
-// electron exports a getter, get the actual getter function itself
-let getElectronExports = Object.getOwnPropertyDescriptor(electronModule, 'exports').get;
-// ... and then delete it
-delete electronModule.exports;
-// ... and then replace it with our own
+// copy exports object
+let electronExports = Object.getOwnPropertyDescriptors(electronModule.exports);
+let OldBrowserWindow = electronExports.BrowserWindow.get();
+// monkey-patch electron.BrowserWindow with more fuckery
+class BrowserWindow extends OldBrowserWindow {
+  constructor(opts) {
+    log('intercepted creation of window', opts.title);
+    let isMainWindow = opts.title === MAIN_WINDOW_TITLE;
+    if (isMainWindow) {
+      // replace preload script with our own
+      opts.webPreferences = Object.assign({}, opts.webPreferences, {
+        preload: path.join(__dirname, 'inject-preload.js'),
+        // force enable devtools
+        devTools: true
+      });
+
+    } else {
+      log('created window does not match title', MAIN_WINDOW_TITLE);
+    }
+    super(opts);
+    // install adblocker
+    (async () => {
+      const blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+        path: path.join(__dirname, '.adblocker.cache'),
+        read: fsP.readFile,
+        write: fsP.writeFile
+      });
+      blocker.enableBlockingInSession(this.webContents.session);
+      log('installed adblocker on window', opts.title);
+    })();
+    if (isMainWindow) {
+      // store the main window for later
+      mainWindow = this;
+      // install custom error handler
+      this.webContents.on('crashed', (_event, killed) => {
+        // so usually you'd expect event to contain details about why everything
+        // is on fire, but in this case, for some reason, it doesn't.
+        // the following code is pretty much useless
+        if (killed) {
+          log('main window killed');
+          return;
+        }
+        console.error('inject: main window crashed!');
+        console.error(_event);
+      });
+    }
+  }
+}
+electronExports.BrowserWindow.get = () => BrowserWindow;
+// create new exports object
+let newExports = Object.create(null);
+Object.defineProperties(newExports, electronExports);
 Object.defineProperty(electronModule, 'exports', {
   enumerable: true,
   configurable: false,
-  get() {
-    // call original getter function exported by electron
-    let exportsOriginal = getElectronExports();
-    // copy exports object, may not be necessary
-    let exports = Object.assign({}, exportsOriginal);
-    // monkey-patch electron.BrowserWindow with more fuckery
-    class BrowserWindow extends exportsOriginal.BrowserWindow {
-      constructor(opts) {
-        log('intercepted creation of window', opts.title);
-        let isMainWindow = opts.title === MAIN_WINDOW_TITLE;
-        if (isMainWindow) {
-          // replace preload script with our own
-          opts.webPreferences = Object.assign({}, opts.webPreferences, {
-            preload: path.join(__dirname, 'inject-preload.js'),
-            // force enable devtools
-            devTools: true
-          });
-
-        } else {
-          log('created window does not match title', MAIN_WINDOW_TITLE);
-        }
-        super(opts);
-        // install adblocker
-        (async () => {
-          const blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
-            path: path.join(__dirname, '.adblocker.cache'),
-            read: fsP.readFile,
-            write: fsP.writeFile
-          });
-          blocker.enableBlockingInSession(this.webContents.session);
-          log('installed adblocker on window', opts.title);
-        })();
-        if (isMainWindow) {
-          // store the main window for later
-          mainWindow = this;
-          // install custom error handler
-          this.webContents.on('crashed', (_event, killed) => {
-            // so usually you'd expect event to contain details about why everything
-            // is on fire, but in this case, for some reason, it doesn't.
-            // the following code is pretty much useless
-            if (killed) {
-              log('main window killed');
-              return;
-            }
-            console.error('inject: main window crashed!');
-            console.error(_event);
-          });
-        }
-      }
-    }
-    exports.BrowserWindow = BrowserWindow;
-    return exports;
-  }
+  value: newExports
 });
 
 // try to load extensions
