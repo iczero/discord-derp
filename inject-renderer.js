@@ -201,6 +201,8 @@ GatewaySocket.prototype.connect = function connect() {
   log('intercepted GatewaySocket.connect');
   gatewaySocket = this;
   gatewayConnectOriginal.call(this);
+  if (gatewaySocket._didFinalInit) return;
+  gatewaySocket._didFinalInit = true;
   try {
     lateResolveModules();
     gatewaySocket.on('dispatch', (event, ...args) => {
