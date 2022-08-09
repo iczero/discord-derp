@@ -7,11 +7,11 @@ const EventEmitter = require('events');
 const toml = require('@iarna/toml');
 // const util = require('util');
 // SOON
-const ffi = require('ffi-napi');
-const ref = require('ref-napi');
+// const ffi = require('ffi-napi');
+// const ref = require('ref-napi');
 const { Keccak, KeccakRand } = require('./keccak');
 
-const log = (...args) => console.log('inject-preload:', ...args);
+const log = console.log.bind(console, 'inject-preload:');
 
 class Deferred {
   constructor() {
@@ -47,6 +47,9 @@ let injectRenderer = fsP.readFile(path.join(__dirname, 'inject-renderer.js'))
     log('loaded inject-renderer.js');
     return a.toString();
   });
+
+// loaded into renderer before document loads
+let injectRendererEarly = fs.readFileSync(path.join(__dirname, 'inject-renderer-early.js')).toString();
 
 const CORE_MODULE_PATH = electron.ipcRenderer.sendSync('INJECT_GET_CORE_MODULE_PATH');
 log('core module path', CORE_MODULE_PATH);
@@ -106,6 +109,9 @@ if (window.opener === null) {
     // with the frame. another script is loaded here for that purpose
     electron.webFrame.executeJavaScript(await injectRenderer);
   });
+
+  // execute before document loads
+  electron.webFrame.executeJavaScript(injectRendererEarly);
 }
 
 { // TODO: actual modules or something that isn't dumb at least
@@ -267,7 +273,6 @@ if (window.opener === null) {
   await rendererWait;
   if (!await reloadCSS()) return;
   fs.watch(CSS_DIRNAME, (type, filename) => {
-    log('filename:', filename);
     if (filename !== CSS_FILENAME) return;
     log(`custom css changed (${type}), reloading`);
     reloadCSS();

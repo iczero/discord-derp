@@ -1,5 +1,11 @@
 /* eslint-disable new-cap */
-const log = (...args) => inject.console.log('inject-renderer:', ...args);
+const logConsole = _earlyExports.console.log.bind(_earlyExports.console, 'inject-renderer:');
+const log = (...args) => {
+  logConsole(...args);
+  _earlyExports.appendEarlyLogFancy('inject-renderer:', ...args);
+};
+
+let loadSucceeded
 
 // prevent sentry from doing anything
 window.__SENTRY__.globalEventProcessors = [() => null];
@@ -8,8 +14,8 @@ window.DiscordSentry = null;
 
 // push a fake module and get webpack's require
 // require.c contains all modules registered with webpack
-let webpackRequire;
-window.webpackChunkdiscord_app.push([['_inject'], {}, r => webpackRequire = r]);
+let webpackRequire = _earlyExports.webpackRequire;
+// window.webpackChunkdiscord_app.push([['_inject'], {}, r => webpackRequire = r]);
 const modulesList = webpackRequire.c;
 const require = n => modulesList[n].exports;
 
@@ -86,11 +92,11 @@ const resolvedModules = resolveModules({
   guildAvatars: m => m.default && typeof m.default.getGuildMemberAvatarURLSimple === 'function',
   defaultAvatars: m => m.default?.DEFAULT_AVATARS instanceof Array,
   permissionsEvaluator: m => m?.ALLOW && typeof m?.default?.computePermissions === 'function',
-  channel: m => typeof m?.default?.prototype?.isActiveThread === 'function' && typeof m?.default?.prototype?.isVocal === 'function',
+  channel: m => typeof m?.default?.prototype?.isActiveThread === 'function' && typeof m?.default?.prototype?.isDM === 'function',
   guild: m => typeof m?.default?.prototype?.getIconSource === 'function' && typeof m?.default?.prototype?.isOwnerWithRequiredMfaLevel === 'function'
 });
 
-const { Endpoints, ActionTypes, ComponentActions, Permissions, ChannelTypes } = resolvedModules.data;
+const { Endpoints, ComponentActions, Permissions, ChannelTypes } = resolvedModules.data;
 const dispatcher = resolvedModules.dispatcher.default;
 const superagent = resolvedModules.superagent;
 const ComponentDispatch = resolvedModules.componentDispatch.ComponentDispatch;
@@ -215,12 +221,14 @@ GatewaySocket.prototype.connect = function connect() {
   } catch (err) {
     inject.console.error('error in GatewaySocket monkeypatch', err);
   }
+
+  setTimeout(() => _earlyExports.logOverlayContainer.style.display = 'none', 100);
 }
 
 // expose convenience variables for usage in devtools
 let currentGuild = null;
 let currentChannel = null;
-dispatcher.subscribe(ActionTypes.CHANNEL_SELECT, event => {
+dispatcher.subscribe('CHANNEL_SELECT', event => {
   currentGuild = event.guildId;
   currentChannel = event.channelId;
 });
@@ -228,7 +236,7 @@ function jumpToChannel(id) {
   let channel = channelRegistry.getChannel(id);
   if (!channel) throw new Error('channel not found');
   dispatcher.dispatch({
-    type: ActionTypes.CHANNEL_SELECT,
+    type: 'CHANNEL_SELECT',
     guildId: channel.guild_id,
     channelId: channel.id
   });
@@ -468,7 +476,7 @@ class SlowmodeQueue {
         setTimeout(() => this.drain(channelId), delay);
         // inform ui
         dispatcher.dispatch({
-          type: ActionTypes.SLOWMODE_SET_COOLDOWN,
+          type: 'SLOWMODE_SET_COOLDOWN',
           slowmodeType: SlowmodeType.SendMessage,
           channelId,
           cooldownMs: delay
@@ -502,7 +510,7 @@ gatewayEvents.on('MESSAGE_CREATE', event => {
     slowmodeQueue.restartCooldown(event.channel_id);
     // inform ui as well
     dispatcher.dispatch({
-      type: ActionTypes.SLOWMODE_RESET_COOLDOWN,
+      type: 'SLOWMODE_RESET_COOLDOWN',
       slowmodeType: SlowmodeType.SendMessage,
       channelId: event.channel_id
     });
@@ -569,6 +577,7 @@ function logArgs(name) {
 }
 
 // force enable developer mode
+/*
 Object.defineProperty(resolvedModules.experiments.default, 'isDeveloper', {
   configurable: false,
   enumerable: false,
@@ -577,6 +586,7 @@ Object.defineProperty(resolvedModules.experiments.default, 'isDeveloper', {
     throw new Error('santa will not be giving you presents');
   }
 });
+*/
 
 // mpv override lmao
 // note: is very bad, do not use, can and will delete discord to autoplay gifs
@@ -798,6 +808,7 @@ let cssOverride = document.createElement('style');
 document.head.appendChild(cssOverride);
 document.body.classList.add('theme-override');
 preloadEvents.on('css-update', css => {
+  log('received css update from preload');
   cssOverride.innerHTML = css;
 });
 
