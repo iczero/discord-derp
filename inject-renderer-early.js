@@ -63,6 +63,7 @@
       appendEarlyLog(`Full stack trace:`);
       appendEarlyLog(`${event.error.stack}`);
     }
+    appendEarlyLog(`=================`);
   })
 
   function documentHtmlLoadHandler() {}
@@ -129,23 +130,26 @@
   let webpackJsonpEarlyChunks = [];
   let webpackRequire = null;
   let moduleProxyHandlers = new Map();
+  let redirectedModules = new Map();
+  let moduleRedirectProxyHandlers = new Map();
+  let moduleOriginalExports = new Map();
+  let poisonedExports = new Set();
 
-  exports.moduleProxyHandlers = moduleProxyHandlers;
-
-  const PROXY_HANDLER_KEYS = [
-    'apply', 'construct', 'defineProperty', 'deleteProperty',
+  const PROXY_HANDLER_ACTIONS = [
+    'apply', 'construct', 'defineProperty', 'deleteProperty', 'get',
     'getOwnPropertyDescriptor', 'getPrototypeOf', 'has', 'isExtensible',
-    'ownKeys', 'preventExtensions', 'setPrototypeOf'
+    'ownKeys', 'preventExtensions', 'set', 'setPrototypeOf'
   ];
   const PROXY_HANDLERS = new Map();
   // create handlers for each action, to be bound with module id
-  for (let action of PROXY_HANDLER_KEYS) {
-    PROXY_HANDLERS.set(action, (moduleId, ...args) => {
+  for (let action of PROXY_HANDLER_ACTIONS) {
+    if (['get', 'set', 'defineProperty'].includes(action)) continue;
+    PROXY_HANDLERS.set(action, (moduleId, target, ...args) => {
       let override = moduleProxyHandlers.get(moduleId);
       if (override?.[action]) {
-        return override[action](...args);
+        return override[action](target, ...args);
       } else {
-        return Reflect[action](...args);
+        return Reflect[action](target, ...args);
       }
     });
   }
@@ -157,7 +161,7 @@
     if (override?.get) {
       return override.get(target, property, receiver);
     } else {
-      return Reflect.get(target, property, target);
+      return Reflect.get(target, property);
     }
   });
   PROXY_HANDLERS.set('set', (moduleId, target, property, value, receiver) => {
@@ -165,7 +169,19 @@
     if (override?.set) {
       return override.set(target, property, value, receiver);
     } else {
-      return Reflect.set(target, property, value, target);
+      return Reflect.set(target, property, value);
+    }
+  });
+  // record modules with nonconfigurable properties on exports
+  PROXY_HANDLERS.set('defineProperty', (moduleId, target, property, descriptor) => {
+    let override = moduleProxyHandlers.get(moduleId);
+    if (override?.defineProperty) {
+      return override.defineProperty(target, property, descriptor);
+    } else {
+      if (!descriptor.configurable) {
+        poisonedExports.add(moduleId);
+      }
+      return Reflect.defineProperty(target, property, descriptor);
     }
   });
 
@@ -178,13 +194,61 @@
     return new Proxy(exports, handler);
   }
 
+  // "redirect proxies" are proxies created on objects that redirect almost all
+  // actions to another target. these have different restrictions. notably,
+  // proxies on objects with non-configurable properties cannot return different
+  // values for said properties. redirect proxies wrap dummy objects and so they
+  // can, however, they cannot trap getOwnPropertyDescriptor.
+  const REDIRECT_PROXY_HANDLERS = new Map();
+  for (let action of PROXY_HANDLER_ACTIONS) {
+    REDIRECT_PROXY_HANDLERS.set(action, (moduleId, redirectTarget, proxyTarget, ...args) => {
+      let override = moduleRedirectProxyHandlers.get(moduleId);
+      if (override?.[action]) {
+        return override[action](redirectTarget, proxyTarget, ...args);
+      } else {
+        return Reflect[action](redirectTarget, ...args);
+      }
+    })
+  }
+
+  function createModuleExportsRedirectProxy(moduleId, exports) {
+    let handler = {};
+    for (let [action, unbound] of PROXY_HANDLERS.entries()) {
+      handler[action] = unbound.bind(null, moduleId, exports);
+    }
+    return new Proxy(Object.create(null), handler);
+  }
+
+  function redirectModule(moduleId) {
+    if (redirectedModules.has(moduleId)) {
+      return redirectedModules.get(moduleId);
+    }
+    let exports = moduleOriginalExports.get(moduleId);
+    let proxy = createModuleExportsRedirectProxy(moduleId, exports);
+    redirectedModules.set(moduleId, proxy);
+    return proxy;
+  }
+
   function createModuleProxy(moduleId, module) {
-    // proxy exports object
-    module.exports = createModuleExportsProxy(moduleId, module.exports);
     // trap overwriting of exports
     let proxiedModule = new Proxy(module, {
+      get(target, property, value, _receiver) {
+        if (property === 'exports') {
+          // do we have a redirection?
+          let redirection = redirectedModules.get(moduleId);
+          if (redirection) {
+            return redirection;
+          } else {
+            return Reflect.get(target, 'exports');
+          }
+        } else {
+          return Reflect.get(target, property);
+        }
+      },
       set(target, property, value, _receiver) {
         if (property === 'exports') {
+          // store original (not proxied) object
+          moduleOriginalExports.set(moduleId, value);
           // proxy exports if it is an object
           if (typeof value === 'object' && value !== null || typeof value === 'function') {
             let proxiedExports = createModuleExportsProxy(moduleId, value);
@@ -195,12 +259,28 @@
         } else {
           return Reflect.set(target, property, value);
         }
+      },
+      defineProperty(target, property, descriptor) {
+        if (property === 'exports') {
+          // we don't handle this currently
+          log('createModuleProxy: warning: module', moduleId, 'defineProperty exports');
+        }
+        return Reflect.defineProperty(target, property, descriptor);
       }
     });
+    // call the handler
+    proxiedModule.exports = {};
     // overwrite __webpack_module_cache__ entry with proxied module
     webpackRequire.c[moduleId] = proxiedModule;
     return proxiedModule;
   }
+
+  // export useful stuff
+  exports.webpackInterception = {
+    moduleProxyHandlers, redirectedModules, moduleRedirectProxyHandlers, moduleOriginalExports,
+    PROXY_HANDLERS, createModuleExportsProxy, REDIRECT_PROXY_HANDLERS, createModuleExportsRedirectProxy,
+    createModuleProxy, redirectModule, poisonedExports
+  };
 
   function processWebpackChunk(chunk) {
     // called for each chunk before it is loaded by webpack
