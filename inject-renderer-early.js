@@ -290,7 +290,7 @@
       wrappedModules[id] = (module, _exports, require) => {
         // TODO: resolveModules logic, including determining whether a module
         // should be proxied or have its exports replaced entirely
-        module = createModuleProxy(id, module);
+        //module = createModuleProxy(id, module);
         return moduleFn.call(module.exports, module, module.exports, require);
       };
     }

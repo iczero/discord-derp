@@ -4,18 +4,18 @@
   "description": "random discord crap",
   "main": "inject.js",
   "dependencies": {
-    "@cliqz/adblocker-electron": "^1.23.2",
+    "@cliqz/adblocker-electron": "^1.25.0",
     "@iarna/toml": "^2.2.5",
-    "cross-fetch": "^3.1.4",
-    "debug": "^4.3.3",
+    "cross-fetch": "^3.1.5",
+    "debug": "^4.3.4",
     "ffi-napi": "^4.0.3",
     "wolframalpha-websocket-api": "github:iczero/wolframalpha-websocket-api",
-    "yargs-parser": "^21.0.0"
+    "yargs-parser": "^21.1.1"
   },
   "devDependencies": {
     "@types/debug": "^4.1.7",
-    "@types/node": "^17.0.8",
-    "typescript": "^4.5.4"
+    "@types/node": "^18.7.16",
+    "typescript": "^4.8.3"
   },
   "scripts": {
     "build": "tsc -p .",

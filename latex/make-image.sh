@@ -9,7 +9,7 @@ if [[ "$tmpdir" == "" ]]; then
   exit 2
 fi
 cat tex.head - tex.tail > "$tmpdir/input.tex"
-podman run --rm -v "$tmpdir:/data" latexbuild:1.0 /opt/compile.sh >&2
+podman run --security-opt=label=disable --rm -v "$tmpdir:/data" latexbuild:1.0 /opt/compile.sh >&2
 compilestatus=$?
 echo "exit status: $compilestatus" >&2
 exitstatus=0
