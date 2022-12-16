@@ -1,4 +1,4 @@
-\documentclass[preview]{standalone}
+\documentclass[preview, border=2pt]{standalone}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{microtype}

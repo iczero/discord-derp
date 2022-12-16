@@ -70,6 +70,7 @@
   function documentHeadLoadHandler() {}
   function documentBodyLoadHandler() {
     document.body.appendChild(logOverlayContainer);
+    setTimeout(() => logOverlayContainer.remove(), 10_000);
   }
 
   // at this point, document.documentElement does not exist yet and we can't
